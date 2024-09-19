@@ -1,5 +1,6 @@
 #ifndef LINK_H
 #define LINK_H
+
 #include <vector>
 #include <iostream>
 
@@ -15,6 +16,8 @@ namespace TrafficAssignment {
       T free_flow_time, T b, T power, T speed, T toll) :
       init(init), term(term), type(type), capacity(capacity), length(length),
       free_flow_time(free_flow_time), b(b), power(power), speed(speed), toll(toll), flow(0) { };
+
+    ~Link() { }
 
     // Calculates the delay function value based on the given flow and link characteristics
     T Delay(T temp_flow = -1) {
