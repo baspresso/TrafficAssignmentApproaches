@@ -6,7 +6,7 @@
 # Add source to this project's executable.
 add_executable (TrafficAssignmentApproaches
     "src/main.cpp"
-    )
+    "src/DataProcessor.cpp")
 
 target_include_directories(TrafficAssignmentApproaches 
     PRIVATE 
