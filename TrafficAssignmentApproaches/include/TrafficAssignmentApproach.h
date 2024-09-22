@@ -88,6 +88,14 @@ namespace TrafficAssignment {
       return ans;
     }
 
+    T Delta() {
+      T delta = 0;
+      for (int t = 0; t < number_of_origin_destination_pairs_; t++) {
+        delta = std::max(delta, origin_destination_pairs_[t].RoutesDelta());
+      }
+      return delta;
+    }
+
     template <typename U>
     void SetPretunedSolution(TrafficAssignmentApproach <U>& solution) {
       this->start_ = solution.GetStart();
@@ -145,10 +153,12 @@ namespace TrafficAssignment {
         int cnt_not_processed = origin_info_[origin].size();
         std::vector <int> destinations;
         while (cnt_not_processed > 0) {
-          if (q.top().second != -1)
+          if (q.top().second != -1) {
             u = links_[q.top().second].term;
-          else
+          }
+          else {
             u = origin;
+          }
           if (processed.count(u)) {
             q.pop();
             continue;
