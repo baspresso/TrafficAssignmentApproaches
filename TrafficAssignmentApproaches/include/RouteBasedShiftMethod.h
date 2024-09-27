@@ -10,7 +10,9 @@ namespace TrafficAssignment {
     RouteBasedShiftMethod(std::vector <Link <T>>& links, std::vector <OriginDestinationPair <T>>& origin_destination_pairs) :  
       links_(links), origin_destination_pairs_(origin_destination_pairs) {}
 
-    virtual void PerformShift(int od_pair_index) {}
+    virtual ~RouteBasedShiftMethod() = default;
+
+    virtual std::vector <T> FlowShift(int od_pair_index) = 0;
   protected:
     std::vector <Link <T>>& links_;
     std::vector <OriginDestinationPair <T>>& origin_destination_pairs_;

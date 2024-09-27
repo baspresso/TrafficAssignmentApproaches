@@ -14,21 +14,29 @@ namespace TrafficAssignment {
       TrafficAssignmentApproach<T>::TrafficAssignmentApproach(dataset_name, alpha) {
       shift_method_ = nullptr;
     }
+
+    ~RouteBasedApproach() {
+      delete shift_method_;
+    }
+
     void ComputeTrafficFlows() override { 
       int iteration_count = 0;
       while (iteration_count++ < 10) {
         for (int origin_index = 0; origin_index < this->number_of_zones_; origin_index++) {
           this->SingleOriginBestRoutes(origin_index);
-          for (int cnt = 0; cnt < origin_cycle_count; cnt++) {
+          for (int cnt = 0; cnt < origin_iteration_count; cnt++) {
             for (auto now : this->origin_info_[origin_index]) {
-              PerformShift(now.second);
+              if (this->origin_destination_pairs_[now.second].GetRoutesCount() > 1) {
+                ExecuteFlowShift(now.second);
+              }
             }
           }
         }
         
-        for (int count = 0; count < full_cycle_count; count++) {
+        for (int count = 0; count < full_iteration_count; count++) {
           for (int od_pair_index = 0; od_pair_index < this->number_of_origin_destination_pairs_; od_pair_index++) {
-            PerformShift(od_pair_index);
+            ExecuteFlowShift(od_pair_index);
+
             //this->GetStatistics();
           }
           //this->GetStatistics();
@@ -36,13 +44,27 @@ namespace TrafficAssignment {
       }
     }
   protected:
-    const int full_cycle_count = 20;
-    const int origin_cycle_count = 5;
+    const int full_iteration_count = 20;
+    const int origin_iteration_count = 5;
     RouteBasedShiftMethod <T>* shift_method_;
 
-    void PerformShift(int od_pair_index) {
-      shift_method_->PerformShift(od_pair_index);
+    std::vector <T> FlowShift(int od_pair_index) {
+      return shift_method_->FlowShift(od_pair_index);
     }
+
+    std::vector <Link<T>>& GetLinksRef() {
+      return this->links_;
+    }
+
+    std::vector <OriginDestinationPair<T>>& GetOriginDestinationPairsRef() {
+      return this->origin_destination_pairs_;
+    }
+
+    void ExecuteFlowShift(int od_pair_index) {
+      std::vector <T> flow_shift = FlowShift(od_pair_index);
+      this->origin_destination_pairs_[od_pair_index].SetRoutesFlow(flow_shift);
+    }
+
   };
 }
 

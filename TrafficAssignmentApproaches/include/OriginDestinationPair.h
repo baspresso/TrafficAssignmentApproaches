@@ -227,17 +227,6 @@ namespace TrafficAssignment {
       }
     }
 
-    void ShowRoutesFlow() {
-      for (int i = 0; i < this->routes_.size(); i++) {
-        std::cout << this->origin_ << ' ' << this->dest_ << ' ';
-        std::cout << links_[routes_[i][0]].init << ',';
-        for (auto now : routes_[i]) {
-          std::cout << links_[now].term << ',';
-        }
-        std::cout << ' ' << this->routes_flow_[i] << '\n';
-      }
-    }
-
     bool CheckNonZeroCapacityRoutes() {
       bool fl = true;
       for (int i = 0; i < this->routes_.size(); i++) {
