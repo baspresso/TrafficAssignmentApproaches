@@ -16,7 +16,7 @@ include_directories(${EIGEN3_INCLUDE_DIR})
 # Add source to this project's executable.
 add_executable (TrafficAssignmentApproaches
     "src/main.cpp"
-    "src/DataProcessor.cpp" "include/RouteBasedKrylatov2023ShiftMethod.h" "include/RouteBasedKrylatov2023Approach.h")
+    "src/DataProcessor.cpp")
 
 target_include_directories(TrafficAssignmentApproaches 
     PRIVATE 
