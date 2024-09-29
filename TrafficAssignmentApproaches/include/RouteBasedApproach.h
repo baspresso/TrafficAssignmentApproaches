@@ -21,6 +21,9 @@ namespace TrafficAssignment {
 
     void ComputeTrafficFlows() override { 
       int iteration_count = 0;
+      for (int origin_index = 0; origin_index < this->number_of_zones_; origin_index++) {
+        this->SingleOriginBestRoutes(origin_index);
+      }
       while (iteration_count++ < 10) {
         for (int origin_index = 0; origin_index < this->number_of_zones_; origin_index++) {
           this->SingleOriginBestRoutes(origin_index);

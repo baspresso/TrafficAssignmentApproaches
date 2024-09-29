@@ -12,8 +12,8 @@ namespace TrafficAssignment {
     const long double power, capacity, length, free_flow_time, b, speed, toll;
     T flow;
 
-    Link(int init, int term, int type, T capacity, T length,
-      T free_flow_time, T b, T power, T speed, T toll) :
+    Link(int init, int term, T capacity, T length,
+      T free_flow_time, T b, T power, T speed, T toll, int type) :
       init(init), term(term), type(type), capacity(capacity), length(length),
       free_flow_time(free_flow_time), b(b), power(power), speed(speed), toll(toll), flow(0) { };
 

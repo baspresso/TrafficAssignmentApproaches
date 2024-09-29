@@ -22,7 +22,7 @@ namespace TrafficAssignment {
       std::vector <T> flow_shift(routes_count);
 
       for (int i = 0; i < routes_count; i++) {
-        flow_shift[i] = routes_flow[i] - flow_delta(i, 0);
+        flow_shift[i] = routes_flow[i] + flow_delta(i, 0);
       }
       return flow_shift;
     }

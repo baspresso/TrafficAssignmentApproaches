@@ -37,11 +37,13 @@ namespace TrafficAssignment {
       }
 
       std::vector <std::vector <T>> trips = data_processor_.GetTrips();
+      origin_info_.resize(number_of_zones_);
       for (int origin = 0; origin < number_of_zones_; origin++) {
         for (int dest = 0; dest < number_of_zones_; dest++) {
           if (trips[origin][dest] > 0) {
             origin_destination_pairs_.emplace_back(origin, dest, trips[origin][dest], links_, adjacency_list_);
             number_of_origin_destination_pairs_++;
+            origin_info_[origin][dest] = number_of_origin_destination_pairs_ - 1;
           }
         }
       }

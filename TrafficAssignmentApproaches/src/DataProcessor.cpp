@@ -41,11 +41,13 @@ namespace TrafficAssignment {
 
         std::getline(ss, temp, ','); init = std::stoi(temp) - 1;
         std::getline(ss, temp, ','); term = std::stoi(temp) - 1;
-        std::getline(ss, temp, ','); capacity = std::stoi(temp);
-        std::getline(ss, temp, ','); free_flow_time = std::stoi(temp);
-        std::getline(ss, temp, ','); b = std::stoi(temp);
-        std::getline(ss, temp, ','); speed = std::stoi(temp);
-        std::getline(ss, temp, ','); toll = std::stoi(temp);
+        std::getline(ss, temp, ','); capacity = std::stod(temp);
+        std::getline(ss, temp, ','); length = std::stod(temp);
+        std::getline(ss, temp, ','); free_flow_time = std::stod(temp);
+        std::getline(ss, temp, ','); b = std::stod(temp);
+        std::getline(ss, temp, ','); power = std::stod(temp);
+        std::getline(ss, temp, ','); speed = std::stod(temp);
+        std::getline(ss, temp, ','); toll = std::stod(temp);
         std::getline(ss, temp); type = std::stoi(temp);
 
         links_.emplace_back(init, term, capacity, length, free_flow_time, b, power, speed, toll, type);
@@ -88,10 +90,10 @@ namespace TrafficAssignment {
         std::string temp;
         long double demand;
         for (int j = 0; j < number_of_zones_ - 1; j++) {
-          std::getline(ss, temp, ','); demand = std::stoi(temp);
+          std::getline(ss, temp, ','); demand = std::stod(temp);
           trips_[i][j] = demand;
         }
-        std::getline(ss, temp); demand = std::stoi(temp);
+        std::getline(ss, temp); demand = std::stod(temp);
         trips_[i][number_of_zones_ - 1] = demand;
       }
 

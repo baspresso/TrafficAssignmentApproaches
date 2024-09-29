@@ -200,11 +200,9 @@ namespace TrafficAssignment {
       }
       for (int i = 1; i < routes_.size(); i++) {
         delay_route = Link<T>::GetLinksDelay(links_, routes_[i]);
-        delay_min = min(delay_min, delay_route);
-        delay_max = max(delay_max, delay_route);
+        delay_min = std::min(delay_min, delay_route);
+        delay_max = std::max(delay_max, delay_route);
       }
-      //if (abs(delay_max - delay_min) > 1)
-      //cout << abs(delay_max - delay_min) << '\n';
       return abs(delay_max - delay_min);
     }
 
