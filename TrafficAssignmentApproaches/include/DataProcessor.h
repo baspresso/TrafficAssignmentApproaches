@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include "Link.h"
+#include <filesystem>
 
 namespace TrafficAssignment {
   class DataProcessor {
@@ -37,9 +38,9 @@ namespace TrafficAssignment {
     std::vector <Link <long double>> links_;
     std::vector <std::vector <long double>> trips_;
 
-    bool LoadNet(const std::string& filename);
+    bool LoadNet(const std::filesystem::path& net_file_path);
 
-    bool LoadTrips(const std::string& filename);
+    bool LoadTrips(const std::filesystem::path& trips_file_path);
 
   };
 }

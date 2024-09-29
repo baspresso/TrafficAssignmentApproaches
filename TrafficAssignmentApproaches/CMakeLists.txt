@@ -21,6 +21,7 @@ add_executable (TrafficAssignmentApproaches
 target_include_directories(TrafficAssignmentApproaches 
     PRIVATE 
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/data"
     )
 
 

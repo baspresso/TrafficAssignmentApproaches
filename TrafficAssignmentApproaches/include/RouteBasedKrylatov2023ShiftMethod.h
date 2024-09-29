@@ -18,7 +18,7 @@ namespace TrafficAssignment {
     std::vector <T> FlowShift(int od_pair_index) {
       int routes_count = this->origin_destination_pairs_[od_pair_index].GetRoutesCount();
       std::vector <T> routes_flow = this->origin_destination_pairs_[od_pair_index].GetRoutesFlow();
-      MatrixXd flow_delta = (-1) * RoutesJacobiMatrix(od_pair_index).inverse() * (RoutesDelayColumn() - EColumn() * TargetDelay());
+      MatrixXd flow_delta = (-1) * RoutesJacobiMatrix(od_pair_index).inverse() * (RoutesDelayColumn(od_pair_index) - EColumn(od_pair_index) * TargetDelay(od_pair_index));
       std::vector <T> flow_shift(routes_count);
 
       for (int i = 0; i < routes_count; i++) {
@@ -102,14 +102,14 @@ namespace TrafficAssignment {
     }
 
     T TargetDelay(int od_pair_index) {
-      T delay_const_route = ConstRouteDelay();
+      T delay_const_route = ConstRouteDelay(od_pair_index);
       if (CheckConstRouteDelay(od_pair_index)) {
         return ConstRouteDelay(od_pair_index);
       }
       else {
-        MatrixXd e = EColumn();
-        MatrixXd jacobi_inv = RoutesJacobiMatrix().inverse();
-        return (e.transpose() * jacobi_inv * RoutesDelayColumn())(0, 0) / (e.transpose() * jacobi_inv * e)(0, 0);
+        MatrixXd e = EColumn(od_pair_index);
+        MatrixXd jacobi_inv = RoutesJacobiMatrix(od_pair_index).inverse();
+        return (e.transpose() * jacobi_inv * RoutesDelayColumn(od_pair_index))(0, 0) / (e.transpose() * jacobi_inv * e)(0, 0);
       }
     }
 

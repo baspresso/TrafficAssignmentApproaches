@@ -16,7 +16,6 @@ namespace TrafficAssignment {
   public:
     TrafficAssignmentApproach(std::string dataset_name, T alpha = 1e-6) :
       number_of_nodes_(0), number_of_zones_(0), number_of_links_(0), number_of_origin_destination_pairs_(0), alpha_(alpha) {
-
       data_processor_.LoadData(dataset_name);
 
       number_of_nodes_ = data_processor_.GetNumberOfNodes();
