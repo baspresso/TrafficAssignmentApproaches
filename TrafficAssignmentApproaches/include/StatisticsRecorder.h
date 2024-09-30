@@ -21,12 +21,14 @@ namespace TrafficAssignment {
 
     ~StatisticsRecorder() = default;
 
-    void StartRecording(TrafficAssignmentApproach<T>* traffic_assignment_approach, std::string dataset_name, std::string approach_name = "") {
+    void StartRecording(TrafficAssignmentApproach<T>* traffic_assignment_approach, std::string dataset_name) {
       file_path = std::filesystem::current_path();
       while (file_path.filename() != "out") {
         file_path = file_path.parent_path();
       }
-      file_path = file_path.parent_path() / "TrafficAssignmentApproaches" / "performance_results" / (dataset_name + "_" + approach_name + ".csv");
+      file_path = file_path.parent_path() / "TrafficAssignmentApproaches" / "performance_results" / dataset_name;
+      std::filesystem::create_directories(file_path);
+      file_path /= (traffic_assignment_approach->GetApproachName() + ".csv");
       file.open(file_path, std::ios::out);
 
       file << "RGAP,Objective Function,Time\n";

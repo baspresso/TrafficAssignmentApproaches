@@ -79,7 +79,9 @@ namespace TrafficAssignment {
       return result;
     }
 
-    virtual void ComputeTrafficFlows() {};
+    virtual std::string GetApproachName() = 0;
+
+    virtual void ComputeTrafficFlows() = 0;
 
     T ObjectiveFunction() {
       T ans = 0;
@@ -112,12 +114,12 @@ namespace TrafficAssignment {
       return delta;
     }
 
-    template <typename U>
-    void SetPretunedSolution(TrafficAssignmentApproach <U>& solution) {
-      this->start_ = solution.GetStart();
-      this->time_on_statistics_ = solution.GetTimeOnStatistics();
-      SetOriginDestinationPairsInfo(solution.GetOriginDestinationRoutes(), solution.GetOriginDestinationRoutesFlows());
-    }
+    //template <typename U>
+    //void SetPretunedSolution(TrafficAssignmentApproach <U>& solution) {
+    //  this->start_ = solution.GetStart();
+    //  this->time_on_statistics_ = solution.GetTimeOnStatistics();
+    //  SetOriginDestinationPairsInfo(solution.GetOriginDestinationRoutes(), solution.GetOriginDestinationRoutesFlows());
+    //}
 
     protected:
       T alpha_;

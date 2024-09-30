@@ -50,6 +50,11 @@ namespace TrafficAssignment {
         }
       }
     }
+
+    std::string GetApproachName() override {
+      return shift_method_->GetApproachName();
+    }
+
   protected:
     const int full_iteration_count = 20;
     const int origin_iteration_count = 5;

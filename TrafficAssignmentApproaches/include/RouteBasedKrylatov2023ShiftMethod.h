@@ -27,6 +27,10 @@ namespace TrafficAssignment {
       return flow_shift;
     }
 
+    std::string GetApproachName() override {
+      return "RouteBasedKrylatov2023";
+    }
+
   private:
     MatrixXd RoutesJacobiMatrix(int od_pair_index) {
       std::vector <std::vector <int>> routes = this->origin_destination_pairs_[od_pair_index].GetRoutes();
