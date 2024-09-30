@@ -15,8 +15,8 @@ namespace TrafficAssignment {
   class TrafficAssignmentApproach {
   public:
     TrafficAssignmentApproach(std::string dataset_name, T alpha = 1e-6) :
-      number_of_nodes_(0), number_of_zones_(0), number_of_links_(0), number_of_origin_destination_pairs_(0), alpha_(alpha) {
-      data_processor_.LoadData(dataset_name);
+      number_of_nodes_(0), number_of_zones_(0), number_of_links_(0), number_of_origin_destination_pairs_(0), alpha_(alpha), dataset_name_(dataset_name) {
+      data_processor_.LoadData(dataset_name_);
 
       number_of_nodes_ = data_processor_.GetNumberOfNodes();
       number_of_zones_ = data_processor_.GetNumberOfZones();
@@ -89,6 +89,21 @@ namespace TrafficAssignment {
       return ans;
     }
 
+    T RelativeGap() {
+      T result = 1, numerator = 0, denominator = 0;
+      for (int origin_index = 0; origin_index < number_of_zones_; origin_index++) {
+        auto best_routes = SingleOriginBestRoutes(origin_index);
+        for (auto now : best_routes) {
+          numerator += origin_destination_pairs_[now.first].GetDemand() * Link<T>::GetLinksDelay(links_, now.second);
+        }
+      }
+      for (auto& link : links_) {
+        denominator += link.flow * link.Delay();
+      }
+      result -= numerator / denominator;
+      return result;
+    }
+
     T Delta() {
       T delta = 0;
       for (int t = 0; t < number_of_origin_destination_pairs_; t++) {
@@ -115,20 +130,9 @@ namespace TrafficAssignment {
       // stores information about all destinations for the single origin
       std::vector <std::unordered_map <int, int>> origin_info_;
       int number_of_nodes_, number_of_zones_, number_of_links_, number_of_origin_destination_pairs_;
+      std::string dataset_name_;
       DataProcessor data_processor_;
-
-      T RelativeGap() {
-        T result = 1, numerator = 0, denominator = 0;
-        for (auto& od_pair : origin_destination_pairs_) {
-          std::vector <int> best_route = od_pair.BestRoute();
-          numerator += od_pair.GetDemand() * Link<T>::GetLinksDelay(links_, best_route);
-        }
-        for (auto& link : links_) {
-          denominator += link.flow * link.Delay();
-        }
-        result -= numerator / denominator;
-        return result;
-      }
+      StatisticsRecorder <T> statistics_recorder_;
 
       std::vector <int> RestoreRoute(int origin, int dest, const std::unordered_map <int, int>& used_link) {
         int now = dest;
@@ -179,11 +183,15 @@ namespace TrafficAssignment {
           }
         }
         for (auto dest : destinations) {
-          // adds new route for od-pair with destination dest
-          origin_destination_pairs_[origin_info_[origin][dest]].AddNewRoute(RestoreRoute(origin, dest, used_link));
           best_routes.push_back({ origin_info_[origin][dest], RestoreRoute(origin, dest, used_link) });
         }
         return best_routes;
+      }
+
+      void AddNewOriginDestinationRoutes(const std::vector <std::pair <int, std::vector <int>>>& routes) {
+        for (auto now : routes) {
+          origin_destination_pairs_[now.first].AddNewRoute(now.second);
+        }
       }
 
       template <typename U>

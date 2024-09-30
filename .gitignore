@@ -365,3 +365,5 @@ FodyWeavers.xsd
 venv/
 
 /data
+
+/performance_results

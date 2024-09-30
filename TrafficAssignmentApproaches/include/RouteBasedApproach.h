@@ -20,13 +20,17 @@ namespace TrafficAssignment {
     }
 
     void ComputeTrafficFlows() override { 
+      this->statistics_recorder_.StartRecording(this, this->dataset_name_);
       int iteration_count = 0;
       for (int origin_index = 0; origin_index < this->number_of_zones_; origin_index++) {
-        this->SingleOriginBestRoutes(origin_index);
+        auto best_routes = this->SingleOriginBestRoutes(origin_index);
+        this->AddNewOriginDestinationRoutes(best_routes);
       }
       while (iteration_count++ < 10) {
         for (int origin_index = 0; origin_index < this->number_of_zones_; origin_index++) {
-          this->SingleOriginBestRoutes(origin_index);
+          auto best_routes = this->SingleOriginBestRoutes(origin_index);
+          this->AddNewOriginDestinationRoutes(best_routes);
+          this->statistics_recorder_.RecordStatistics();
           for (int cnt = 0; cnt < origin_iteration_count; cnt++) {
             for (auto now : this->origin_info_[origin_index]) {
               if (this->origin_destination_pairs_[now.second].GetRoutesCount() > 1) {
