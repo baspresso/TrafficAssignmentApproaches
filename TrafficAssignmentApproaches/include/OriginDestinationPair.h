@@ -5,6 +5,7 @@
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
+#include <algorithm>
 #include "Link.h"
 
 namespace TrafficAssignment {
@@ -45,8 +46,8 @@ namespace TrafficAssignment {
           used_links.push_back(now);
         }
       }
-      sort(used_links.begin(), used_links.end());
-      used_links.resize(unique(used_links.begin(), used_links.end()) - used_links.begin());
+      std::sort(used_links.begin(), used_links.end());
+      used_links.resize(std::unique(used_links.begin(), used_links.end()) - used_links.begin());
       return used_links;
     }
 
@@ -147,7 +148,7 @@ namespace TrafficAssignment {
         new_route.push_back(used_link[now]);
         now = links_[used_link[now]].init;
       }
-      reverse(new_route.begin(), new_route.end());
+      std::reverse(new_route.begin(), new_route.end());
       return new_route;
     }
 

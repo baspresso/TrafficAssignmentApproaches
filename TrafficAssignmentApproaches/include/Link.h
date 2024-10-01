@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <iostream>
+#include <cmath>
 
 
 namespace TrafficAssignment {
@@ -27,7 +28,7 @@ namespace TrafficAssignment {
       if (capacity == 0 || b == 0) {
         return free_flow_time;
       }
-      return free_flow_time + b * free_flow_time * pow(temp_flow, power) / pow(capacity, power);
+      return free_flow_time + b * free_flow_time * std::pow(temp_flow, power) / std::pow(capacity, power);
     }
 
     // Calculates the integrated delay function value based on the given flow and link characteristics
@@ -38,7 +39,7 @@ namespace TrafficAssignment {
       if (capacity == 0 || b == 0) {
         return free_flow_time * temp_flow;
       }
-      return free_flow_time * (temp_flow + b * capacity * pow(temp_flow / capacity, power + 1) / (power + 1));
+      return free_flow_time * (temp_flow + b * capacity * std::pow(temp_flow / capacity, power + 1) / (power + 1));
     }
 
     // Calculates the differentiated delay function value based on the given flow and link characteristics
@@ -49,7 +50,7 @@ namespace TrafficAssignment {
       if (capacity == 0 || b == 0) {
         return 0;
       }
-      return free_flow_time * b * power * pow(temp_flow / capacity, power - 1) / capacity;
+      return free_flow_time * b * power * std::pow(temp_flow / capacity, power - 1) / capacity;
     }
 
     // Calculates the double differentiated delay function value based on the given flow and link characteristics
@@ -60,7 +61,7 @@ namespace TrafficAssignment {
       if (capacity == 0) {
         return 0;
       }
-      return free_flow_time * b * power * (power - 1) * pow(temp_flow, power - 2) / pow(capacity, power);
+      return free_flow_time * b * power * (power - 1) * std::pow(temp_flow, power - 2) / std::pow(capacity, power);
     }
 
     // Calculates the sum of provideded links delays

@@ -31,6 +31,7 @@ namespace TrafficAssignment {
           auto best_routes = this->SingleOriginBestRoutes(origin_index);
           this->AddNewOriginDestinationRoutes(best_routes);
           this->statistics_recorder_.RecordStatistics();
+
           for (int cnt = 0; cnt < origin_iteration_count; cnt++) {
             for (auto now : this->origin_info_[origin_index]) {
               if (this->origin_destination_pairs_[now.second].GetRoutesCount() > 1) {
@@ -43,16 +44,10 @@ namespace TrafficAssignment {
         for (int count = 0; count < full_iteration_count; count++) {
           for (int od_pair_index = 0; od_pair_index < this->number_of_origin_destination_pairs_; od_pair_index++) {
             ExecuteFlowShift(od_pair_index);
-
-            //this->GetStatistics();
           }
-          //this->GetStatistics();
+          this->statistics_recorder_.RecordStatistics();
         }
       }
-    }
-
-    std::string GetApproachName() override {
-      return shift_method_->GetApproachName();
     }
 
   protected:

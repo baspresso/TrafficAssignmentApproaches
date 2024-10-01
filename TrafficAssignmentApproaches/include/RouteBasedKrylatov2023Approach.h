@@ -14,6 +14,10 @@ namespace TrafficAssignment {
     }
 
     ~RouteBasedKrylatov2023Approach() = default;
+
+    std::string GetApproachName() override {
+      return "RouteBasedKrylatov2023";
+    }
   };
 }
 

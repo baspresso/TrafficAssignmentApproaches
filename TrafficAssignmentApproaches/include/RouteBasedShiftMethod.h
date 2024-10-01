@@ -14,8 +14,6 @@ namespace TrafficAssignment {
 
     virtual std::vector <T> FlowShift(int od_pair_index) = 0;
 
-    virtual std::string GetApproachName() = 0;
-
   protected:
     std::vector <Link <T>>& links_;
     std::vector <OriginDestinationPair <T>>& origin_destination_pairs_;
