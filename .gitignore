@@ -364,6 +364,4 @@ FodyWeavers.xsd
 
 venv/
 
-TrafficAssignmentApproaches/data/
-
 /performance_results

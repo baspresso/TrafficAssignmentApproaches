@@ -46,7 +46,7 @@ namespace TrafficAssignment {
       this->statistics_recorder_.StartRecording(this, this->dataset_name_);
       AllOrNothingAssignment();
       this->statistics_recorder_.RecordStatistics();
-      for (int i = 0; i < 10; i++) {
+      for (int i = 0; i < 50; i++) {
         EquilibrationIteration();
       }
     }
@@ -93,6 +93,10 @@ namespace TrafficAssignment {
 
     // 
     const T computation_threshold_ = 1e-7;
+
+    std::priority_queue <std::pair <T, int>> delta_pas_queue;
+
+    int pas_processed_last_queue_update;
 
     void AllOrNothingAssignment() {
       for (int origin_index = 0; origin_index < this->number_of_origins_; origin_index++) {
@@ -327,6 +331,12 @@ namespace TrafficAssignment {
     void OriginLinkPasInitialization(int origin_index, const std::pair <std::vector <int>, std::vector <int>>& found_pas) {
       int pas_hash = HashPas(found_pas);
       this->pas_users_[pas_hash].insert(origin_index);
+
+      if (this->pas_users_[pas_hash].size() == 1) {
+        //std::cout << 1 << '\n';
+        delta_pas_queue.push({ PasDelta(pas_hash), pas_hash });
+        //std::cout << 2 << '\n';
+      }
 
       origin_corresponding_pas_set_[origin_index].insert(pas_hash);
       for (auto pas_link : found_pas.first) {
@@ -640,30 +650,90 @@ namespace TrafficAssignment {
       return pas_subset;
     }
 
+    void DeltaPasQueuePreparation() {
+      while (!delta_pas_queue.empty()) {
+        delta_pas_queue.pop();
+      }
+      pas_processed_last_queue_update = 0;
+    }
+
+    T PasDelta(int pas) {
+      return std::abs(Link<T>::GetLinksDelay(this->links_, reserved_pas_hash_[pas].first) - Link<T>::GetLinksDelay(this->links_, reserved_pas_hash_[pas].second));
+    }
+
+    void UpdateDeltaPasQueue() {
+      while (!delta_pas_queue.empty()) {
+        delta_pas_queue.pop();
+      }
+      pas_processed_last_queue_update = 0;
+      for (const auto& now : reserved_pas_hash_) {
+        delta_pas_queue.push({ PasDelta(now.first), now.first });
+      }
+    }
+
+    bool DeltaPasQueuePushRequirement(int pas_hash) {
+      if (!reserved_pas_hash_.count(pas_hash)) {
+        return false;
+      }
+      std::pair <T, T> pas_flow = PasTotalAmountOfFlow(pas_hash);
+      if (pas_flow.first < computation_threshold_ || pas_flow.second < computation_threshold_) {
+        return false;
+      }
+      return true;
+    }
+
+    void PasProcessing(bool elimination_flag) {
+      if (pas_processed_last_queue_update > reserved_pas_hash_.size() / 2) {
+        UpdateDeltaPasQueue();
+      }
+      if (delta_pas_queue.empty()) {
+        return;
+      }
+      pas_processed_last_queue_update++;
+      int pas_hash = delta_pas_queue.top().second;
+      delta_pas_queue.pop();
+      PasFLowShift(pas_hash, elimination_flag);
+      if (DeltaPasQueuePushRequirement(pas_hash)) {
+        delta_pas_queue.push({ PasDelta(pas_hash), pas_hash });
+      }
+    }
+
     void EquilibrationIteration() {
       EliminationPasNonLeastCostRoutesTree();
+      UpdateDeltaPasQueue();
+      std::vector <int> origin_order(number_of_origins_);
       for (int origin_index = 0; origin_index < this->number_of_origins_; origin_index++) {
+        origin_order[origin_index] = origin_index;
+      }
+      std::random_device rd;
+      std::mt19937 g(rd());
+      std::shuffle(origin_order.begin(), origin_order.end(), g);
+      for (int origin_index : origin_order) {
         SingleOriginRemoveAllCyclicFlows(origin_index);
         BuildSingleOriginLeastCostRoutesTree(origin_index);
         SingleOriginLinksPasConstruction(origin_index);
-        for (int cnt = 0; cnt < 10; cnt++) {
+        for (int cnt = 0; cnt < 1; cnt++) {
+          PasProcessing(false);
           //this->AllPasOriginCheck();
           //std::vector <int> pas_subset = GetPasSubset();
           //for (auto pas_hash : origin_corresponding_pas_set_[origin_index]) {
           //  pas_subset.push_back(pas_hash);
           //}
-          for (auto pas_hash : origin_corresponding_pas_set_[origin_index]) {
-            PasFLowShift(pas_hash, false);
-          }
+          //std::vector <int> pas_subset = GetPasSubset();
+          //for (auto pas_hash : pas_subset) {
+          //for (auto pas_hash : origin_corresponding_pas_set_[origin_index]) {
+          //  PasFLowShift(pas_hash, false);
+          //}
           this->statistics_recorder_.RecordStatistics();
         }
         //cout << this->reserved_pas_hash_.size() << ' ' << this->ObjectiveFunction() << '\n';
         this->statistics_recorder_.RecordStatistics();
       }
-      for (int cnt = 0; cnt < 20; cnt++) {
+      for (int cnt = 0; cnt < 10; cnt++) {
         std::vector <int> pas_subset = GetPasSubset();
-        for (auto pas_hash : pas_subset) {
-          PasFLowShift(pas_hash, true);
+        for (int i = 0; i < pas_subset.size(); i++) {
+          //PasFLowShift(pas_subset[i], true);
+          PasProcessing(true);
         }
         this->statistics_recorder_.RecordStatistics();
       }

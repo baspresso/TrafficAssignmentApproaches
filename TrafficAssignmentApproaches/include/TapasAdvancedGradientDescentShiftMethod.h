@@ -27,16 +27,16 @@ namespace TrafficAssignment {
       std::pair <T, T> ders_ratio = { pas_der.first / (pas_second_der.first), pas_der.second / (pas_second_der.second) };
       flow_shift = -ders_ratio.first + (ders_ratio.first + ders_ratio.second) / (pas_second_der.first) / (1 / (pas_second_der.first) + 1 / (pas_second_der.second));
       //cout << flow_shift << '\n';
-      if (flow_shift < 0) {
-        flow_shift = -std::min(total_flow.first, -flow_shift);
-      }
-      else {
-        flow_shift = std::min(total_flow.second, flow_shift);
-      }
+      //if (flow_shift < 0) {
+      //  flow_shift = -std::min(total_flow.first, -flow_shift);
+      //}
+      //else {
+      //  flow_shift = std::min(total_flow.second, flow_shift);
+      //}
 
-      while (ObjectiveFunctionIncreaseResult(flow_shift, pas)) {
-        flow_shift /= 2;
-      }
+      //while (ObjectiveFunctionIncreaseResult(flow_shift, pas)) {
+      //  flow_shift /= 2;
+      //}
 
       return { flow_shift, -flow_shift };
     }

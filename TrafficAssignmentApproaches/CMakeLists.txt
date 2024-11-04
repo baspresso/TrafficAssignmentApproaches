@@ -1,11 +1,12 @@
-﻿# CMakeList.txt : CMake project for TrafficAssignmentApproaches, include source and define
-# project specific logic here.
-#
+﻿cmake_minimum_required(VERSION 3.10)
+project(TrafficAssignmentApproaches)
 
-# Убедитесь, что вы подключили vcpkg через CMake
-#if(CMAKE_HOST_WIN32)
-#    set(CMAKE_TOOLCHAIN_FILE "C:\tools\vcpkg\scripts\buildsystems\vcpkg.cmake" CACHE STRING "Vcpkg toolchain file")
-#endif()
+# Include vcpkg through CMake
+if(CMAKE_HOST_WIN32)
+    set(CMAKE_TOOLCHAIN_FILE "C:/tools/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "Vcpkg toolchain file")
+endif()
+
+#find_package(Boost REQUIRED COMPONENTS multiprecision)
 
 set(EIGEN3_INCLUDE_DIR "C:/tools/vcpkg/packages/eigen3_x64-windows/include/eigen3")
 include_directories(${EIGEN3_INCLUDE_DIR})
