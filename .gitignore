@@ -364,4 +364,6 @@ FodyWeavers.xsd
 
 venv/
 
+/.vscode
+
 /performance_results
