@@ -7,6 +7,7 @@
 #include <queue>
 #include <string>
 #include <random>
+#include <map>
 #include "TrafficAssignmentApproach.h"
 #include "TapasShiftMethod.h"
 #include "TapasLineSearchShiftMethod.h"
@@ -31,6 +32,7 @@ namespace TrafficAssignment {
       origin_corresponding_pas_set_.resize(this->number_of_origins_);
       links_origin_least_cost_routes_tree_.resize(this->number_of_origins_);
       parent_origin_least_cost_routes_tree_.resize(this->number_of_origins_);
+      origin_link_pair_pas_.resize(this->number_of_origins_);
       for (int origin_index = 0; origin_index < this->number_of_origins_; origin_index++) {
         bush_links_flows_[origin_index].resize(this->number_of_links_, 0);
         origin_link_corresponding_pas_[origin_index].resize(this->number_of_links_, -1);
@@ -46,8 +48,12 @@ namespace TrafficAssignment {
       this->statistics_recorder_.StartRecording(this, this->dataset_name_);
       AllOrNothingAssignment();
       this->statistics_recorder_.RecordStatistics();
-      for (int i = 0; i < 50; i++) {
-        EquilibrationIteration();
+      T prev = 0, now = 0;
+      for (int i = 0; i < 20; i++) {
+        EquilibrationIteration(i + 1);
+        prev = now;
+        now = this->ObjectiveFunction();
+        //std::cout << prev - now << ' ' << reserved_pas_hash_.size() << '\n';
       }
     }
 
@@ -97,6 +103,8 @@ namespace TrafficAssignment {
     std::priority_queue <std::pair <T, int>> delta_pas_queue;
 
     int pas_processed_last_queue_update;
+
+    std::vector <std::map <std::pair <int, int>, int>> origin_link_pair_pas_;
 
     void AllOrNothingAssignment() {
       for (int origin_index = 0; origin_index < this->number_of_origins_; origin_index++) {
@@ -331,11 +339,13 @@ namespace TrafficAssignment {
     void OriginLinkPasInitialization(int origin_index, const std::pair <std::vector <int>, std::vector <int>>& found_pas) {
       int pas_hash = HashPas(found_pas);
       this->pas_users_[pas_hash].insert(origin_index);
-
+      std::pair <int, int> term_links = { found_pas.first[found_pas.first.size() - 1], found_pas.second[found_pas.second.size() - 1] };
+      if (term_links.first > term_links.second) {
+        std::swap(term_links.first, term_links.second);
+      }
+      origin_link_pair_pas_[origin_index][term_links] = pas_hash;
       if (this->pas_users_[pas_hash].size() == 1) {
-        //std::cout << 1 << '\n';
         delta_pas_queue.push({ PasDelta(pas_hash), pas_hash });
-        //std::cout << 2 << '\n';
       }
 
       origin_corresponding_pas_set_[origin_index].insert(pas_hash);
@@ -392,12 +402,43 @@ namespace TrafficAssignment {
       return found_pas;
     }
 
+    bool CheckLinkPairPas(int origin_index, int link_1, int link_2) {
+      if (link_1 > link_2) {
+        std::swap(link_1, link_2);
+      }
+      if (origin_link_pair_pas_[origin_index].count({ link_1, link_2 })) {
+        return true;
+      }
+      else {
+        return false;
+      }
+    }
+
+    bool LinkPasConstructionCondition(int origin_index, int link_index) {
+      if (this->links_origin_least_cost_routes_tree_[origin_index].count(link_index)) {
+        return false;
+      }
+      if (this->bush_links_flows_[origin_index][link_index] < this->computation_threshold_) {
+        return false;
+      }
+      int term = this->links_[link_index].term;
+      int least_cost_routes_link = -1;
+      for (int link_index : this->adjacency_list_[parent_origin_least_cost_routes_tree_[origin_index][term]]) {
+        if (this->links_[link_index].term == term) {
+          int least_cost_routes_link = link_index;
+        }
+      }
+      if (CheckLinkPairPas(origin_index, link_index, least_cost_routes_link)) {
+        return false;
+      }
+      return true;
+    }
+
     // For every link that doesn't have a PAS corresponding to it builds a new PAS
     void SingleOriginLinksPasConstruction(int origin_index) {
       for (int link_index = 0; link_index < this->number_of_links_; link_index++) {
         //(this->origin_link_corresponding_pas_[origin_index][link_index] == -1) &&
-        if (!(this->links_origin_least_cost_routes_tree_[origin_index].count(link_index)) &&
-          (this->bush_links_flows_[origin_index][link_index] > this->computation_threshold_)) {
+        if (LinkPasConstructionCondition(origin_index, link_index)) {
           OriginLinkPasInitialization(origin_index, OriginLinkPasConstruction(origin_index, link_index));
         }
       }
@@ -524,12 +565,18 @@ namespace TrafficAssignment {
     }
 
     void EliminatePas(const int pas_hash) {
+      //std::cout << 1 << '\n';
       std::pair <std::vector <int>, std::vector <int>> cur_pas = this->reserved_pas_hash_[pas_hash];
+      std::pair <int, int> term_links = { cur_pas.first[cur_pas.first.size() - 1], cur_pas.second[cur_pas.second.size() - 1] };
+      if (term_links.first > term_links.second) {
+        std::swap(term_links.first, term_links.second);
+      }
       for (auto origin_index : pas_users_[pas_hash]) {
         for (auto link_index : cur_pas.first) {
           origin_link_corresponding_pas_[origin_index][link_index] = -1;
         }
         origin_corresponding_pas_set_[origin_index].erase(pas_hash);
+        origin_link_pair_pas_[origin_index].erase(term_links);
       }
       for (auto origin_index : pas_users_[pas_hash]) {
         for (auto link_index : cur_pas.second) {
@@ -538,7 +585,7 @@ namespace TrafficAssignment {
       }
       pas_users_.erase(pas_hash);
       // REQUIRES CONSIDERATION
-      //reserved_pas_hash_.erase(pas_hash);
+      reserved_pas_hash_.erase(pas_hash);
     }
 
     // If direction is true than shift is performed from the first to the second part of PAS
@@ -630,7 +677,7 @@ namespace TrafficAssignment {
     void EliminationPasNonLeastCostRoutesTree() {
       for (int origin_index = 0; origin_index < this->number_of_origins_; origin_index++) {
         for (int link_index = 0; link_index < this->number_of_links_; link_index++) {
-          origin_link_corresponding_pas_[origin_index][link_index] = -1;
+          origin_link_corresponding_pas_[origin_index][link_index] = -1;  
         }
         origin_corresponding_pas_set_[origin_index].clear();
       }
@@ -698,8 +745,8 @@ namespace TrafficAssignment {
       }
     }
 
-    void EquilibrationIteration() {
-      EliminationPasNonLeastCostRoutesTree();
+    void EquilibrationIteration(int iteration_number) {
+      //EliminationPasNonLeastCostRoutesTree();
       UpdateDeltaPasQueue();
       std::vector <int> origin_order(number_of_origins_);
       for (int origin_index = 0; origin_index < this->number_of_origins_; origin_index++) {
@@ -729,9 +776,10 @@ namespace TrafficAssignment {
         //cout << this->reserved_pas_hash_.size() << ' ' << this->ObjectiveFunction() << '\n';
         this->statistics_recorder_.RecordStatistics();
       }
-      for (int cnt = 0; cnt < 10; cnt++) {
-        std::vector <int> pas_subset = GetPasSubset();
-        for (int i = 0; i < pas_subset.size(); i++) {
+      for (int cnt = 0; cnt < iteration_number * 5; cnt++) {
+        //std::vector <int> pas_subset = GetPasSubset();
+        for (int i = 0; i < reserved_pas_hash_.size(); i++) {
+        //for (int i = 0; i < pas_subset.size(); i++) {
           //PasFLowShift(pas_subset[i], true);
           PasProcessing(true);
         }
