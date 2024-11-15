@@ -17,6 +17,8 @@ namespace TrafficAssignment {
   protected:
     std::vector <Link <T>>& links_;
 
+    const double computational_treshold_ = 1e-7;
+
     bool FlowShiftResult(const std::pair <std::vector <int>, std::vector <int>> pas, const std::pair <T, T> flow_shift) {
       std::pair <T, T> pas_delay = { 0, 0 };
       for (auto link_index : pas.first) {

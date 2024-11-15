@@ -202,6 +202,20 @@ namespace TrafficAssignment {
           this->origin_destination_pairs_[i].SetNewRoutesInfo(od_routes[i], od_routes_flows[i]);
         }
       }
+
+      T RoutesLinksObjectiveFunction(const std::vector <std::vector <int>>& routes) {
+        std::unordered_set <int> links;
+        for (const auto& route : routes) {
+          for (const auto& link_index : route) {
+            links.insert(link_index);
+          }
+        }
+        T objective_function_on_links = 0;
+        for (auto link_index : links) {
+          objective_function_on_links += links_[link_index].DelayInteg();
+        }
+        return objective_function_on_links;
+      }
   };
 }
 
