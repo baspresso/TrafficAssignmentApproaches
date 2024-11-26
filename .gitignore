@@ -1,0 +1,82 @@
+# Build directories
+build/
+out/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+
+# Visual Studio Code settings
+.vscode/
+
+# User-specific settings
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Temporary files
+*.tmp
+*.log
+*.swp
+*.swo
+*~
+
+# Object files
+*.o
+*.obj
+
+# Libraries
+*.lib
+*.a
+
+# Executable files
+*.exe
+*.out
+*.app
+*.dll
+*.so
+*.dylib
+
+# Dependency files
+*.d
+
+# Coverage files
+*.gcno
+*.gcda
+*.gcov
+
+# Debug files
+*.pdb
+*.idb
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+
+# Other IDE or editor files
+.idea/
+*.iml
+
+# Python cache (if using Python scripts)
+__pycache__/
+*.py[cod]
+
+# Git files
+.git/
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite
+
+# Certificates
+*.pem
