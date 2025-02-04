@@ -22,6 +22,7 @@ int main() {
     double a = 1e-10;
     long double b = 1e-10;
     std::cout <<  std::setprecision(20) << (a /= 5234) << '\n';
-    //std::cout <<  std::setprecision(20) << (b /= 5234) << '\n';
+	std::cout << "RERRE\n";
+    std::cout <<  std::setprecision(20) << (b /= 5234) << '\n';
 	return 0;
 }

@@ -50,12 +50,21 @@ namespace TrafficAssignment {
       file.close();
     }
 
+    void PauseRecording() {
+      pause_start_ = std::chrono::high_resolution_clock::now();
+    }
+
+    void ContinueRecording() {
+      time_on_statistics_ += 0.001 * (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - pause_start_).count());
+    }
+
   private:
     std::chrono::time_point<std::chrono::high_resolution_clock> recording_start_;
     long double time_on_statistics_;
     TrafficAssignmentApproach<T>* traffic_assignment_approach_;
     std::ofstream file;
     std::filesystem::path file_path;
+    std::chrono::time_point<std::chrono::high_resolution_clock> pause_start_;
   };
 }
 
