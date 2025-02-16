@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <map>
 #include "Link.h"
 #include "OriginDestinationPair.h"
 #include "DataProcessor.h"
@@ -130,7 +131,7 @@ namespace TrafficAssignment {
       std::vector <std::vector <int>> reverse_adjacency_list_;
       std::vector <OriginDestinationPair <T>> origin_destination_pairs_;
       // stores information about all destinations for the single origin
-      std::vector <std::unordered_map <int, int>> origin_info_;
+      std::vector <std::map <int, int>> origin_info_;
       int number_of_nodes_, number_of_zones_, number_of_links_, number_of_origin_destination_pairs_;
       std::string dataset_name_;
       DataProcessor data_processor_;
@@ -160,6 +161,10 @@ namespace TrafficAssignment {
         int cnt_not_processed = origin_info_[origin].size();
         std::vector <int> destinations;
         while (cnt_not_processed > 0) {
+          if (q.empty()) {
+            std::cout << "???\n";
+            break;
+          }
           if (q.top().second != -1) {
             u = links_[q.top().second].term;
           }
