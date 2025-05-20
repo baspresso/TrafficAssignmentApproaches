@@ -5,10 +5,10 @@
 #include <string>
 #include <unordered_map>
 #include <map>
-#include "Link.h"
-#include "OriginDestinationPair.h"
-#include "DataProcessor.h"
-#include "StatisticsRecorder.h"
+#include "../data/Link.h"
+#include "../data/OriginDestinationPair.h"
+#include "../utils/DataProcessor.h"
+#include "../utils/StatisticsRecorder.h"
 
 namespace TrafficAssignment {
 

@@ -1,7 +1,7 @@
 #ifndef DATA_PROCESSOR_H
 #define DATA_PROCESSOR_H
 
-#include "Link.h"
+#include "../data/Link.h"
 #include <vector>
 #include <string>
 #include <fstream>

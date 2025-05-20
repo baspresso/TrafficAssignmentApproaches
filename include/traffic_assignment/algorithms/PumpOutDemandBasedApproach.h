@@ -54,6 +54,7 @@ namespace TrafficAssignment {
     }
 
   protected:
+  
     // Stores the demand for each node to each zone
     // The outer vector represents zones and the inner vector represents nodes.
     // Information is stored in a reversed order for uniform format

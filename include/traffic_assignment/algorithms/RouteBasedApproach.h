@@ -36,7 +36,7 @@ namespace TrafficAssignment {
         for (int origin_index = 0; origin_index < this->number_of_zones_; origin_index++) {
           auto best_routes = this->SingleOriginBestRoutes(origin_index);
           this->AddNewOriginDestinationRoutes(best_routes);
-          this->statistics_recorder_.RecordStatistics();
+          //this->statistics_recorder_.RecordStatistics();
 
           for (int cnt = 0; cnt < origin_iteration_count; cnt++) {
             for (auto now : this->origin_info_[origin_index]) {
@@ -57,8 +57,9 @@ namespace TrafficAssignment {
           for (int od_pair_index = 0; od_pair_index < this->number_of_origin_destination_pairs_; od_pair_index++) {
             OriginDestinationPairProcessing(od_queue);
           }
-          this->statistics_recorder_.RecordStatistics();
+          //this->statistics_recorder_.RecordStatistics();
         }
+        this->statistics_recorder_.RecordStatistics();
       }
     }
 
