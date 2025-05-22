@@ -27,7 +27,7 @@ namespace TrafficAssignment {
      * @param links Reference to the network's global link list (directly modified!).
      * @param adjacency_list Reference to the network's adjacency list for graph traversal.
      */
-    OriginDestinationPair(int& origin, int& dest, T& demand, std::vector <Link <T>>& links, std::vector <std::vector <int>>& adjacency_list) :
+    OriginDestinationPair(int origin, int dest, T demand, std::vector <Link <T>>& links, std::vector <std::vector <int>>& adjacency_list) :
       origin_(origin), dest_(dest), demand_(demand), links_(links), adjacency_list_(adjacency_list) { };
 
     ~OriginDestinationPair() = default;
