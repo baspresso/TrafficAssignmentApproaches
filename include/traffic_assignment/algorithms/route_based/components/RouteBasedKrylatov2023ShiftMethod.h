@@ -2,7 +2,7 @@
 #define ROUTE_BASED_KRYLATOV_2023_SHIFT_METHOD_H
 
 #include <unordered_set>
-#include "RouteBasedShiftMethod.h"
+#include "./RouteBasedShiftMethod.h"
 #include "C:/tools/vcpkg/packages/eigen3_x64-windows/include/eigen3/Eigen/Dense"
 
 

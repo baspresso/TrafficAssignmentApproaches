@@ -2,7 +2,7 @@
 #define TAPAS_NEWTON_STEP_APPROACH_H
 
 #include "TapasApproach.h"
-#include "TapasNewtonStepShiftMethod.h"
+#include "./TapasNewtonStepShiftMethod.h"
 
 namespace TrafficAssignment {
   template <typename T>

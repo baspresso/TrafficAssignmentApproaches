@@ -1,7 +1,7 @@
 #ifndef DEMAND_BASED_APPROACH_H
 #define DEMAND_BASED_APPROACH_H
 
-#include "TapasApproach.h"
+#include "../common/TrafficAssignmentApproach.h"
 #include <limits>
 #include <stack>
 

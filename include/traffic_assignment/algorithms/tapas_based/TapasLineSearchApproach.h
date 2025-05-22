@@ -2,7 +2,7 @@
 #define TAPAS_LINE_SEARCH_APPROACH_H
 
 #include "TapasApproach.h"
-#include "TapasLineSearchShiftMethod.h"
+#include "./TapasLineSearchShiftMethod.h"
 
 namespace TrafficAssignment {
   template <typename T>

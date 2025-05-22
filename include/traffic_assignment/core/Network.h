@@ -10,9 +10,24 @@
 
 namespace TrafficAssignment {
 
+/**
+   * Represents a complete transportation network with nodes, links, and origin-destination pairs.
+   * Provides infrastructure for traffic assignment algorithms and network analysis.
+   * @tparam T Data type for flow/capacity values (e.g., double).
+   */
 template <typename T>
 class Network {
 public:
+
+    /**
+     * @brief Constructs a Network object with given parameters.
+     * @param nodes Total number of nodes in the network.
+     * @param zones Total number of traffic zones.
+     * @param links Vector of links comprising the network.
+     * @param trips Matrix of travel demands between zones.
+     * @param adjacency Forward adjacency list representation.
+     * @param reverse_adjacency Reverse adjacency list representation.
+     */
     Network(int nodes, int zones,
             std::vector<Link<T>> links,
             std::vector<std::vector<T>> trips,
@@ -27,23 +42,77 @@ public:
         InitializeODPairs(trips);
     }
 
-    // Metadata access
-    int number_of_nodes() const noexcept { return number_of_nodes_; }
-    int number_of_zones() const noexcept { return number_of_zones_; }
+    /// @brief Default destructor (uses default container destruction).
+    ~Network() = default;
+
+    // Network metadata accessors
+    // ---------------------------
+    
+    /**
+     * @brief Returns total number of nodes in the network.
+     * @return Number of nodes as integer.
+     */
     int number_of_links() const noexcept { return links_.size(); }
+
+    /**
+     * @brief Returns current number of links in the network.
+     * @return Number of links as integer.
+     */
     int number_of_od_pairs() const noexcept { return origin_destination_pairs_.size(); }
 
-    // Core accessors
+    // Core data accessors
+    // -------------------
+    
+    /**
+     * @brief Provides read-only access to network links.
+     * @return Const reference to vector of links.
+     */
     const std::vector<Link<T>>& links() const { return links_; }
+
+    /**
+     * @brief Provides read-only access to OD pairs.
+     * @return Const reference to vector of origin-destination pairs.
+     */
     const std::vector<OriginDestinationPair<T>>& od_pairs() const { return origin_destination_pairs_; }
+
+    /**
+     * @brief Provides read-only access to forward adjacency list.
+     * @return Const reference to adjacency list structure.
+     */
     const std::vector<std::vector<int>>& adjacency() const { return adjacency_list_; }
+
+    /**
+     * @brief Provides read-only access to reverse adjacency list.
+     * @return Const reference to reverse adjacency structure.
+     */
     const std::vector<std::vector<int>>& reverse_adjacency() const { return reverse_adjacency_list_; }
 
-    // Mutable accessors for algorithms
+    // Mutable accessors for algorithm manipulation
+    // --------------------------------------------
+    
+    /**
+     * @brief Provides mutable access to network links.
+     * @warning Direct modification affects all dependent components.
+     * @return Reference to mutable vector of links.
+     */
     std::vector<Link<T>>& mutable_links() { return links_; }
+
+    /**
+     * @brief Provides mutable access to OD pairs.
+     * @warning Changes affect traffic assignment results.
+     * @return Reference to mutable vector of OD pairs.
+     */
     std::vector<OriginDestinationPair<T>>& mutable_od_pairs() { return origin_destination_pairs_; }
 
-    // Network analysis
+    // Network analysis operations
+    // ---------------------------
+    
+    /**
+     * @brief Computes shortest paths from a single origin to all destinations.
+     * @param origin Node ID of the starting zone.
+     * @return Vector of pairs containing OD pair index and corresponding shortest path.
+     * @note Uses Dijkstra's algorithm with priority queue implementation.
+     */
     std::vector<std::pair<int, std::vector<int>>> SingleOriginBestRoutes(int origin) const {
         std::priority_queue <std::pair <T, int>, std::vector <std::pair <T, int>>, std::greater <std::pair <T, int>>> q;
         std::vector <std::pair <int, std::vector <int>>> best_routes;
@@ -90,14 +159,24 @@ public:
     }
 
 private:
-    int number_of_nodes_;
-    int number_of_zones_;
-    std::vector<Link<T>> links_;
-    std::vector<std::vector<int>> adjacency_list_;
-    std::vector<std::vector<int>> reverse_adjacency_list_;
-    std::vector<OriginDestinationPair<T>> origin_destination_pairs_;
-    std::vector<std::map<int, int>> origin_info_;
+    // Network topology properties
+    const int number_of_nodes_;      ///< Total number of nodes in the network.
+    const int number_of_zones_;      ///< Total number of traffic zones (origins/destinations).
 
+    // Graph structure components
+    std::vector<Link<T>> links_;                ///< All links in the transportation network.
+    std::vector<std::vector<int>> adjacency_list_;       ///< Adjacency list for forward graph traversal.
+    std::vector<std::vector<int>> reverse_adjacency_list_; ///< Reverse adjacency list for backward traversal.
+
+    // Travel demand information
+    std::vector<OriginDestinationPair<T>> origin_destination_pairs_; ///< All active origin-destination pairs.
+    std::vector<std::map<int, int>> origin_info_; ///< Mapping from origin-destination indices to pair IDs.
+
+    /**
+     * @brief Initializes origin-destination pairs from trip matrix.
+     * @param trips Matrix of travel demands between zones.
+     * @note Automatically filters zero-demand OD pairs.
+     */
     void InitializeODPairs(const std::vector<std::vector<T>>& trips) {
       origin_destination_pairs_.clear();
       origin_destination_pairs_.reserve(number_of_zones_ * number_of_zones_);
@@ -117,6 +196,13 @@ private:
       }
     }
 
+    /**
+     * @brief Reconstructs route from destination back to origin.
+     * @param origin Starting node ID.
+     * @param dest Target node ID.
+     * @param used_link Map of node-to-link connections from pathfinding.
+     * @return Ordered list of link IDs from origin to destination.
+     */
     std::vector <int> RestoreRoute(int origin, int dest, const std::unordered_map <int, int>& used_link) {
         int now = dest;
         std::vector <int> new_route;
@@ -131,4 +217,4 @@ private:
 
 } // namespace TrafficAssignment
 
-#endif
+#endif // NETWORK_H

@@ -9,7 +9,7 @@
 #include <random>
 #include <map>
 #include "TrafficAssignmentApproach.h"
-#include "TapasShiftMethod.h"
+#include "./TapasShiftMethod.h"
 #include "TapasLineSearchShiftMethod.h"
 
 namespace TrafficAssignment {

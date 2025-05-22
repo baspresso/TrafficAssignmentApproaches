@@ -2,7 +2,7 @@
 #define TAPAS_SHIFT_METHOD_H
 
 #include <vector>
-#include "../data/Link.h"
+#include "../../../data/Link.h"
 
 namespace TrafficAssignment {
   template <typename T>

@@ -1,24 +1,17 @@
 #include <iostream>
 #include <iomanip>
-//#include "../include/RouteBasedKrylatov2023Approach.h"
-#include "../include/traffic_assignment/algorithms/RouteBasedKrylatov2023Approach.h"
-//#include "../include/TapasLineSearchApproach.h"
-//#include "../include/TapasAdvancedGradientDescentApproach.h"
-#include "../include/traffic_assignment/algorithms/TapasNewtonStepApproach.h"
-//#include "Eigen/Dense"
-//#include "boost/multiprecision/cpp_bin_float.hpp"
-//#include "../include/PumpOutDemandBasedApproach.h"
-
+#include "../include/traffic_assignment/algorithms/route_based/RouteBasedKrylatov2023Approach.h"
+#include "../include/traffic_assignment/algorithms/demand_based/PumpOutDemandBasedApproach.h"
 #include "../include/traffic_assignment/core/NetworkBuilder.h"
 
 
 int main() {
-	TrafficAssignment::NetworkBuilder builder;
-	auto network = builder.BuildFromDataset<double>("SiouxFalls");
-	std::cout << 1 << '\n';
+	//TrafficAssignment::NetworkBuilder builder;
+	//auto network = builder.BuildFromDataset<double>("SiouxFalls");
+	//std::cout << 1 << '\n';
 	//TrafficAssignment::RouteBasedKrylatov2023Approach<long double>("SiouxFalls").ComputeTrafficFlows();
 	//TrafficAssignment::TapasLineSearchApproach<long double>("SiouxFalls").ComputeTrafficFlows();
-	//TrafficAssignment::PumpOutDemandBasedApproach<long double>("SiouxFalls").ComputeTrafficFlows();
+	TrafficAssignment::PumpOutDemandBasedApproach<long double>("SiouxFalls").ComputeTrafficFlows();
 	//TrafficAssignment::TapasNewtonStepApproach<long double>("SiouxFalls").ComputeTrafficFlows();
 	//TrafficAssignment::TapasAdvancedGradientDescentAppoach<long double>("SiouxFalls").ComputeTrafficFlows();
 	//TrafficAssignment::RouteBasedKrylatov2023Approach<boost::multiprecision::cpp_bin_float_100>("Anaheim").ComputeTrafficFlows();

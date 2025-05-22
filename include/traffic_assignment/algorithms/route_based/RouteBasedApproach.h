@@ -3,8 +3,8 @@
 
 #include <queue>
 #include <string>
-#include "TrafficAssignmentApproach.h"
-#include "RouteBasedShiftMethod.h"
+#include "../common/TrafficAssignmentApproach.h"
+#include "./components/RouteBasedShiftMethod.h"
 #include <random>
 
 namespace TrafficAssignment {

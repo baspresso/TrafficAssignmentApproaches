@@ -2,6 +2,8 @@
 #define ROUTE_BASED_SHIFT_METHOD_H
 
 #include <vector>
+#include "../../../data/Link.h"
+#include "../../../data/OriginDestinationPair.h"
 
 namespace TrafficAssignment {
   template <typename T>

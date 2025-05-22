@@ -2,7 +2,7 @@
 #define ROUTE_BASED_KRYLATOV_2023_APPROACH_H
 
 #include "RouteBasedApproach.h"
-#include "RouteBasedKrylatov2023ShiftMethod.h"
+#include "./components/RouteBasedKrylatov2023ShiftMethod.h"
 
 namespace TrafficAssignment {
   template <typename T>
