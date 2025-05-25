@@ -8,14 +8,14 @@ namespace TrafficAssignment {
   template <typename T>
   class TapasShiftMethod {
   public:
-    TapasShiftMethod(std::vector <Link <T>>& links) : links_(links) {}
+    TapasShiftMethod(const std::vector <Link <T>>& links) : links_(links) {}
     
     virtual ~TapasShiftMethod() = default;
 
     virtual std::pair <T, T> FlowShift(T starting_point, std::pair <std::vector <int>, std::vector <int>> pas, std::pair <T, T> total_flow) = 0;
   
   protected:
-    std::vector <Link <T>>& links_;
+    const std::vector <Link <T>>& links_;
 
     const double computational_treshold_ = 1e-7;
 

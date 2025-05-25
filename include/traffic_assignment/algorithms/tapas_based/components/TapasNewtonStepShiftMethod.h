@@ -7,7 +7,7 @@ namespace TrafficAssignment {
   template <typename T>
   class TapasNewtonStepShiftMethod : public TapasShiftMethod <T> {
   public:
-    TapasNewtonStepShiftMethod(std::vector <Link <T>>& links) : TapasShiftMethod<T>(links) {}
+    TapasNewtonStepShiftMethod(const std::vector <Link <T>>& links) : TapasShiftMethod<T>(links) {}
 
     ~TapasNewtonStepShiftMethod() {}
 

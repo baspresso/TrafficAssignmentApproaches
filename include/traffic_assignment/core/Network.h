@@ -71,6 +71,8 @@ public:
      */
     int number_of_zones() const noexcept { return number_of_zones_; }
 
+    int number_of_nodes() const noexcept { return number_of_nodes_; }
+
     // Core data accessors
     // -------------------
     

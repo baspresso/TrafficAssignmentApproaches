@@ -2,6 +2,8 @@
 #include <iomanip>
 #include "../include/traffic_assignment/algorithms/route_based/RouteBasedKrylatov2023Approach.h"
 #include "../include/traffic_assignment/algorithms/demand_based/PumpOutDemandBasedApproach.h"
+#include "../include/traffic_assignment/algorithms/tapas_based/TapasNewtonStepApproach.h"
+#include "../include/traffic_assignment/algorithms/tapas_based/TapasLineSearchApproach.h"
 #include "../include/traffic_assignment/core/NetworkBuilder.h"
 #include <memory>
 
@@ -11,10 +13,16 @@ int main() {
 	auto network = builder.BuildFromDataset<long double>("SiouxFalls"); // Returns shared_ptr
 
 	// 2. Pass the shared_ptr directly (no std::move needed)
-	TrafficAssignment::RouteBasedKrylatov2023Approach<long double> approach(
+	//TrafficAssignment::RouteBasedKrylatov2023Approach<long double> approach(
+	//	network,  // Shared ownership
+	//	1e-14     // Alpha value (optional)
+	//);
+
+	TrafficAssignment::TapasLineSearchApproach<long double> approach(
 		network,  // Shared ownership
 		1e-14     // Alpha value (optional)
 	);
+
 
 	// 3. Execute traffic assignment
 	approach.ComputeTrafficFlows();

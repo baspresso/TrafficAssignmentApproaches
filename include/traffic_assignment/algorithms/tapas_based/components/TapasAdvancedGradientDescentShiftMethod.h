@@ -7,7 +7,7 @@ namespace TrafficAssignment {
   template <typename T>
   class TapasAdvancedGradientDescentShiftMethod : public TapasShiftMethod <T> {
   public:
-    TapasAdvancedGradientDescentShiftMethod(std::vector <Link <T>>& links) : TapasShiftMethod<T>(links) {}
+    TapasAdvancedGradientDescentShiftMethod(const std::vector <Link <T>>& links) : TapasShiftMethod<T>(links) {}
 
     ~TapasAdvancedGradientDescentShiftMethod() {}
 

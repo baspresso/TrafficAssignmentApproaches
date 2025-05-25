@@ -7,7 +7,7 @@ namespace TrafficAssignment {
   template <typename T>
   class TapasLineSearchShiftMethod : public TapasShiftMethod <T> {
   public:
-    TapasLineSearchShiftMethod(std::vector <Link <T>>& links) : TapasShiftMethod<T>(links) {}
+    TapasLineSearchShiftMethod(const std::vector <Link <T>>& links) : TapasShiftMethod<T>(links) {}
 
     ~TapasLineSearchShiftMethod() {}
 

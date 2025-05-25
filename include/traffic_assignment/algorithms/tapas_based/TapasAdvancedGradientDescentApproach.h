@@ -8,8 +8,8 @@ namespace TrafficAssignment {
   template <typename T>
   class TapasAdvancedGradientDescentAppoach : public TapasApproach <T> {
   public:
-    TapasAdvancedGradientDescentAppoach(std::string dataset_name, T alpha = 1e-6) :
-      TapasApproach<T>(dataset_name, alpha) {
+    TapasAdvancedGradientDescentAppoach(Network<T>& network, T alpha = 1e-6) :
+      TapasApproach<T>(network, alpha) {
       this->shift_method_ = new TapasAdvancedGradientDescentShiftMethod<T>(this->GetLinksRef());
     }
 

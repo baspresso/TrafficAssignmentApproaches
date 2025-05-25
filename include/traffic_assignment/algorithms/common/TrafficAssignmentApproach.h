@@ -5,8 +5,6 @@
 #include <string>
 #include <unordered_map>
 #include <map>
-#include "../../data/Link.h"
-#include "../../data/OriginDestinationPair.h"
 #include "../../utils/DataProcessor.h"
 #include "../../utils/StatisticsRecorder.h"
 #include "../../core/Network.h"

@@ -88,7 +88,7 @@ namespace TrafficAssignment {
      * @param temp_flow Flow value to evaluate at. Defaults to current flow.
      * @return Rate of change of delay with respect to flow (minutes/vehicle).
      */
-    T DelayDer(T temp_flow = -1) {
+    T DelayDer(T temp_flow = -1) const {
       if (temp_flow == -1) {
         temp_flow = flow;
       }
@@ -103,7 +103,7 @@ namespace TrafficAssignment {
      * @param temp_flow Flow value to evaluate at. Defaults to current flow.
      * @return Second derivative of delay (minutes/vehicle²).
      */
-    T DelaySecondDer(T temp_flow = -1) {
+    T DelaySecondDer(T temp_flow = -1) const {
       if (temp_flow == -1) {
         temp_flow = flow;
       }
@@ -119,7 +119,7 @@ namespace TrafficAssignment {
      * @param links_list Indices of links to include in the calculation.
      * @return Sum of delays for the specified links (minutes).
      */
-    static T GetLinksDelay(std::vector <Link <T>>& links, const std::vector <int>& links_list) {
+    static T GetLinksDelay(const std::vector <Link <T>>& links, const std::vector <int>& links_list) {
       T ans = 0;
       for (auto now : links_list) {
         ans += links[now].Delay();

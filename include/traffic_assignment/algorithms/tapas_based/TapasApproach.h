@@ -8,21 +8,21 @@
 #include <string>
 #include <random>
 #include <map>
-#include "TrafficAssignmentApproach.h"
-#include "./TapasShiftMethod.h"
-#include "TapasLineSearchShiftMethod.h"
+#include "../common/TrafficAssignmentApproach.h"
+#include "./components/TapasShiftMethod.h"
+#include "../../core/Network.h"
 
 namespace TrafficAssignment {
   template <typename T>
   class TapasApproach : public TrafficAssignmentApproach <T> {
   public:
-    TapasApproach(std::string dataset_name, T alpha) :
-      TrafficAssignmentApproach<T>::TrafficAssignmentApproach(dataset_name, alpha) {
+    TapasApproach(Network<T>& network, T alpha = 1e-6):
+      TrafficAssignmentApproach<T>::TrafficAssignmentApproach(network, alpha) {
 
       shift_method_ = nullptr;
 
-      for (int i = 0; i < this->number_of_zones_; i++) {
-        if (this->origin_info_[i].size() > 0) {
+      for (int i = 0; i < this->network_.number_of_zones(); i++) {
+        if (this->network_.origin_info()[i].size() > 0) {
           origins_.push_back(i);
         }
       }
@@ -33,10 +33,11 @@ namespace TrafficAssignment {
       links_origin_least_cost_routes_tree_.resize(this->number_of_origins_);
       parent_origin_least_cost_routes_tree_.resize(this->number_of_origins_);
       origin_link_pair_pas_.resize(this->number_of_origins_);
+
       for (int origin_index = 0; origin_index < this->number_of_origins_; origin_index++) {
-        bush_links_flows_[origin_index].resize(this->number_of_links_, 0);
-        origin_link_corresponding_pas_[origin_index].resize(this->number_of_links_, -1);
-        parent_origin_least_cost_routes_tree_[origin_index].resize(this->number_of_nodes_, -1);
+        bush_links_flows_[origin_index].resize(this->network_.number_of_links(), 0);
+        origin_link_corresponding_pas_[origin_index].resize(this->network_.number_of_links(), -1);
+        parent_origin_least_cost_routes_tree_[origin_index].resize(this->network_.number_of_nodes(), -1);
       }
     }
 
@@ -45,14 +46,14 @@ namespace TrafficAssignment {
     }
 
     void ComputeTrafficFlows() {
-      this->statistics_recorder_.StartRecording(this, this->dataset_name_);
+      this->statistics_recorder_.StartRecording(this->GetApproachName());
       AllOrNothingAssignment();
       this->statistics_recorder_.RecordStatistics();
       T prev = 0, now = 0;
       for (int i = 0; i < 20; i++) {
         EquilibrationIteration(i + 1);
         prev = now;
-        now = this->ObjectiveFunction();
+        now = this->network_.ObjectiveFunction();
         //std::cout << prev - now << ' ' << reserved_pas_hash_.size() << '\n';
       }
     }
@@ -108,11 +109,11 @@ namespace TrafficAssignment {
 
     void AllOrNothingAssignment() {
       for (int origin_index = 0; origin_index < this->number_of_origins_; origin_index++) {
-        std::vector <std::pair <int, std::vector <int>>> shortest_routes = this->SingleOriginBestRoutes(origins_[origin_index]);
-        this->AddNewOriginDestinationRoutes(shortest_routes);
+        std::vector <std::pair <int, std::vector <int>>> shortest_routes = this->network_.ComputeSingleOriginBestRoutes(origins_[origin_index]);
+        this->network().AddRoutes(shortest_routes);
         for (int route_index = 0; route_index < shortest_routes.size(); route_index++) {
           for (auto link_index : shortest_routes[route_index].second) {
-            bush_links_flows_[origin_index][link_index] += this->origin_destination_pairs_[shortest_routes[route_index].first].GetDemand();
+            bush_links_flows_[origin_index][link_index] += this->network_.od_pairs()[shortest_routes[route_index].first].GetDemand();
           }
         }
       }
@@ -123,8 +124,8 @@ namespace TrafficAssignment {
       if (this->pas_users_[pas_hash].count(origin_index)) {
         return;
       }
-      if (Link<T>::GetLinksDelay(this->links_, this->reserved_pas_hash_[pas_hash].first) >
-        Link<T>::GetLinksDelay(this->links_, this->reserved_pas_hash_[pas_hash].second)) {
+      if (Link<T>::GetLinksDelay(this->network_.links(), this->reserved_pas_hash_[pas_hash].first) >
+        Link<T>::GetLinksDelay(this->network_.links(), this->reserved_pas_hash_[pas_hash].second)) {
         for (auto now : this->reserved_pas_hash_[pas_hash].first) {
           if (this->bush_links_flows_[origin_index][now] == 0) {
             return;
@@ -151,12 +152,12 @@ namespace TrafficAssignment {
 
     void RemoveCycleFlow(int origin_index, std::vector <int>& cycle) {
       T mn_flow = bush_links_flows_[origin_index][cycle[0]];
-      for (auto now : cycle) {
-        mn_flow = std::min(mn_flow, bush_links_flows_[origin_index][now]);
+      for (auto link_id : cycle) {
+        mn_flow = std::min(mn_flow, bush_links_flows_[origin_index][link_id]);
       }
-      for (auto now : cycle) {
-        bush_links_flows_[origin_index][now] -= mn_flow;
-        this->links_[now].flow -= mn_flow;
+      for (auto link_id : cycle) {
+        bush_links_flows_[origin_index][link_id] -= mn_flow;
+        this->network_.SetLinkFlow(link_id, -mn_flow);
       }
     }
 
@@ -168,11 +169,12 @@ namespace TrafficAssignment {
         return;
       }
       state[cur_node] = 1;
-      for (auto now : this->adjacency_list_[cur_node]) {
+      for (const auto now : this->network_.adjacency()[cur_node]) {
         if (cycle_found) {
           return;
         }
-        int next_node = this->links_[now].term;
+        int next_node = this->network_.links()[now].term;
+        //int next_node = this->links_[now].term;
         if ((bush_links_flows_[origin_index][now] < this->computation_threshold_) || (state[next_node] == 2)) {
           continue;
         }
@@ -183,7 +185,8 @@ namespace TrafficAssignment {
           int temp = cur_node;
           while (temp != next_node) {
             cycle.push_back(link_used[temp]);
-            temp = this->links_[link_used[temp]].init;
+            temp = this->network_.links()[temp].init;
+            //temp = this->links_[link_used[temp]].init;
           }
           RemoveCycleFlow(origin_index, cycle);
           return;
@@ -200,13 +203,13 @@ namespace TrafficAssignment {
     // if finds backward link, that means that cycle is found
     // when cycle is found, it gets removed, then all process of finding a cycle starts again from scratch 
     void SingleOriginRemoveAllCyclicFlows(int origin_index) {
-      std::vector <int> link_used(this->number_of_nodes_, -1);
-      std::vector <int> state(this->number_of_nodes_, 0);
+      std::vector <int> link_used(this->network_.number_of_nodes(), -1);
+      std::vector <int> state(this->network_.number_of_nodes(), 0);
       bool cycle_found = false;
       DfsForCycleIdentification(origin_index, origins_[origin_index], link_used, state, cycle_found);
       while (cycle_found) {
         cycle_found = false;
-        for (int i = 0; i < this->number_of_nodes_; i++) {
+        for (int i = 0; i < this->network_.number_of_nodes(); i++) {
           state[i] = 0;
         }
         DfsForCycleIdentification(origin_index, origins_[origin_index], link_used, state, cycle_found);
@@ -235,7 +238,8 @@ namespace TrafficAssignment {
         cur_delay = q.top().first;
         link_index = q.top().second;
         if (q.top().second != -1) {
-          u = this->links_[link_index].term;
+          u = this->network_.links()[link_index].term;
+          //u = this->links_[link_index].term;
         }
         else {
           u = origin;
@@ -245,14 +249,16 @@ namespace TrafficAssignment {
           continue;
         }
         if (u != current_origin) {
-          this->parent_origin_least_cost_routes_tree_[origin_index][u] = this->links_[link_index].init;
+          this->parent_origin_least_cost_routes_tree_[origin_index][u] = this->network_.links()[link_index].init;
+          //this->parent_origin_least_cost_routes_tree_[origin_index][u] = this->links_[link_index].init;
           this->links_origin_least_cost_routes_tree_[origin_index].insert(link_index);
         }
 
         processed.insert(u);
-        for (auto now : this->adjacency_list_[u]) {
-          if (!processed.count(this->links_[now].term)) {
-            q.push({ cur_delay + this->links_[now].Delay(), now });
+        for (const auto now : this->network_.adjacency()[u]) {
+          if (!processed.count(this->network_.links()[now].term)) {
+          //if (!processed.count(this->links_[now].term)) {
+            q.push({ cur_delay + this->network_.links()[now].Delay(), now });
           }
         }
       }
@@ -270,18 +276,18 @@ namespace TrafficAssignment {
       std::vector <int> pas_part_least_cost_routes_tree, pas_part_not_least_cost_routes_tree;
       // pas_part_not_least_cost_routes_tree building
       int temp = pas_init_node;
-      while (temp != this->links_[link_index].term) {
+      while (temp != this->network_.links()[link_index].term) {
         pas_part_not_least_cost_routes_tree.push_back(used_link.at(temp));
         // ????
-        temp = this->links_[used_link.at(temp)].term;
+        temp = this->network_.links()[used_link.at(temp)].term;
       }
       // pas_part_least_cost_routes_tree building
-      temp = this->links_[link_index].term;
+      temp = this->network_.links()[link_index].term;
       int used_link_index = 0, prev_node = 0;
       while (temp != pas_init_node) {
         prev_node = this->parent_origin_least_cost_routes_tree_[origin_index][temp];
-        for (auto now : this->adjacency_list_[prev_node]) {
-          if (this->links_[now].term == temp) {
+        for (const auto now : this->network_.adjacency()[prev_node]) {
+          if (this->network_.links()[now].term == temp) {
             pas_part_least_cost_routes_tree.push_back(now);
             break;
           }
@@ -370,12 +376,12 @@ namespace TrafficAssignment {
       // contains for every node a link that was used in order to get to that link in bfs
       std::unordered_map <int, int> used_link;
       // origin_term_route building
-      int now = this->links_[link_index].term;
+      int now = this->network_.links()[link_index].term;
       while (now != origins_[origin_index]) {
         now = this->parent_origin_least_cost_routes_tree_[origin_index][now];
         origin_term_route.insert(now);
       }
-      now = this->links_[link_index].init;
+      now = this->network_.links()[link_index].init;
       used_link[now] = link_index;
       q.push(now);
       processed_nodes.insert(now);
@@ -390,11 +396,11 @@ namespace TrafficAssignment {
           fl = true;
         }
         else {
-          for (auto cur_link : this->reverse_adjacency_list_[now]) {
-            if ((bush_links_flows_[origin_index][cur_link] > 0) && (!processed_nodes.count(this->links_[cur_link].init))) {
-              processed_nodes.insert(this->links_[cur_link].init);
-              q.push(this->links_[cur_link].init);
-              used_link[this->links_[cur_link].init] = cur_link;
+          for (auto cur_link : this->network_.reverse_adjacency()[now]) {
+            if ((bush_links_flows_[origin_index][cur_link] > 0) && (!processed_nodes.count(this->network_.links()[cur_link].init))) {
+              processed_nodes.insert(this->network_.links()[cur_link].init);
+              q.push(this->network_.links()[cur_link].init);
+              used_link[this->network_.links()[cur_link].init] = cur_link;
             }
           }
         }
@@ -421,10 +427,10 @@ namespace TrafficAssignment {
       if (this->bush_links_flows_[origin_index][link_index] < this->computation_threshold_) {
         return false;
       }
-      int term = this->links_[link_index].term;
+      int term = this->network_.links()[link_index].term;
       int least_cost_routes_link = -1;
-      for (int link_index : this->adjacency_list_[parent_origin_least_cost_routes_tree_[origin_index][term]]) {
-        if (this->links_[link_index].term == term) {
+      for (int link_index : this->network_.adjacency()[parent_origin_least_cost_routes_tree_[origin_index][term]]) {
+        if (this->network_.links()[link_index].term == term) {
           int least_cost_routes_link = link_index;
         }
       }
@@ -436,7 +442,7 @@ namespace TrafficAssignment {
 
     // For every link that doesn't have a PAS corresponding to it builds a new PAS
     void SingleOriginLinksPasConstruction(int origin_index) {
-      for (int link_index = 0; link_index < this->number_of_links_; link_index++) {
+      for (int link_index = 0; link_index < this->network_.number_of_links(); link_index++) {
         //(this->origin_link_corresponding_pas_[origin_index][link_index] == -1) &&
         if (LinkPasConstructionCondition(origin_index, link_index)) {
           OriginLinkPasInitialization(origin_index, OriginLinkPasConstruction(origin_index, link_index));
@@ -510,10 +516,10 @@ namespace TrafficAssignment {
     bool PasFlowShiftResult(const int pas_hash, const std::pair <T, T> flow_shift) {
       std::pair <T, T> pas_delay = { 0, 0 };
       for (auto link_index : this->reserved_pas_hash_[pas_hash].first) {
-        pas_delay.first += this->links_[link_index].Delay(this->links_[link_index].flow + flow_shift.first);
+        pas_delay.first += this->network_.links()[link_index].Delay(this->network_.links()[link_index].flow + flow_shift.first);
       }
       for (auto link_index : this->reserved_pas_hash_[pas_hash].second) {
-        pas_delay.second += this->links_[link_index].Delay(this->links_[link_index].flow + flow_shift.second);
+        pas_delay.second += this->network_.links()[link_index].Delay(this->network_.links()[link_index].flow + flow_shift.second);
       }
       return (pas_delay.first > pas_delay.second);
     }
@@ -556,11 +562,13 @@ namespace TrafficAssignment {
           this->bush_links_flows_[origin_index][link_index] += proportion[origin_index] * flow_shift.second;
         }
       }
-      for (auto link_index : cur_pas.first) {
-        this->links_[link_index].flow += flow_shift.first;
+      for (auto link_id : cur_pas.first) {
+        this->network_.SetLinkFlow(link_id, flow_shift.first);
+        //this->links_[link_index].flow += flow_shift.first;
       }
-      for (auto link_index : cur_pas.second) {
-        this->links_[link_index].flow += flow_shift.second;
+      for (auto link_id : cur_pas.second) {
+        this->network_.SetLinkFlow(link_id, flow_shift.second);
+        //this->links_[link_index].flow += flow_shift.second;
       }
     }
 
@@ -705,7 +713,7 @@ namespace TrafficAssignment {
     }
 
     T PasDelta(int pas) {
-      return std::abs(Link<T>::GetLinksDelay(this->links_, reserved_pas_hash_[pas].first) - Link<T>::GetLinksDelay(this->links_, reserved_pas_hash_[pas].second));
+      return std::abs(Link<T>::GetLinksDelay(this->network_.links(), reserved_pas_hash_[pas].first) - Link<T>::GetLinksDelay(this->network_.links(), reserved_pas_hash_[pas].second));
     }
 
     void UpdateDeltaPasQueue() {
@@ -789,8 +797,8 @@ namespace TrafficAssignment {
       this->statistics_recorder_.RecordStatistics();
     }
 
-    std::vector <Link<T>>& GetLinksRef() {
-      return this->links_;
+    const std::vector <Link<T>>& GetLinksRef() {
+      return this->network_.links();
     }
   };
 }
