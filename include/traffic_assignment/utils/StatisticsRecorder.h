@@ -2,70 +2,113 @@
 #define STATISTICS_RECORDER_H
 
 #include <chrono>
-//#include <filesystem>
 #include <string>
 #include <fstream>
+#include <iomanip>
+#include <memory>
+#include "../core/Network.h"
 
 namespace TrafficAssignment {
 
-  template <typename T>
-  class TrafficAssignmentApproach;
-
-  template <typename T>
-  class StatisticsRecorder {
-  public:
-    StatisticsRecorder(): 
-      traffic_assignment_approach_(nullptr), time_on_statistics_(0) {
-      recording_start_ = std::chrono::high_resolution_clock::now();
+template <typename T>
+class StatisticsRecorder {
+public:
+    StatisticsRecorder(Network<T>& network) : 
+        network_(network),
+        time_on_statistics_(0.0),
+        is_recording_(false) 
+    {
+        recording_start_ = std::chrono::high_resolution_clock::now();
     }
 
-    ~StatisticsRecorder() = default;
+    void StartRecording(std::string approach_name) {
+        if(is_recording_) return;
 
-    void StartRecording(TrafficAssignmentApproach<T>* traffic_assignment_approach, std::string dataset_name) {
-      file_path = std::filesystem::current_path();
-      //file_path = file_path.parent_path();
-      file_path /= "performance_results";
-      file_path = file_path / dataset_name;
-      std::filesystem::create_directories(file_path);
-      file_path /= (traffic_assignment_approach->GetApproachName() + ".csv");
-      file.open(file_path, std::ios::out);
-
-      file << "RGAP,Objective Function,Time\n";
-
-      traffic_assignment_approach_ = traffic_assignment_approach;
-      time_on_statistics_ = 0;
-
-      recording_start_ = std::chrono::high_resolution_clock::now();
-      file.close();
+        dataset_name_ = network_.name();
+        approach_name_ = approach_name;
+        InitializeOutputFile();
+        ResetTimers();
+        is_recording_ = true;
     }
 
     void RecordStatistics() {
-      auto statistics_start = std::chrono::high_resolution_clock::now();
-      file.open(file_path, std::ios::app);
-      T rgap = traffic_assignment_approach_->RelativeGap();
-      T objective_function = traffic_assignment_approach_->ObjectiveFunction();
-      file << rgap << "," << objective_function << ",";
-      time_on_statistics_ += 0.001 * (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - statistics_start)).count();
-      file << std::setprecision(10) << 0.001 * ((std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - recording_start_)).count()) - time_on_statistics_ << '\n';
-      file.close();
+        //if(!is_recording_ || !file.is_open()) return;
+
+        auto statistics_start = std::chrono::high_resolution_clock::now();
+        
+        file.open(file_path_, std::ios::app);
+        const T rgap = network_.RelativeGap();
+        const T objective = network_.ObjectiveFunction();
+        const T elapsed = GetElapsedTime();
+        
+        file << std::setprecision(10)
+             << rgap << ","
+             << objective << ","
+             << elapsed << "\n";
+        
+        file.close();
+    }
+
+    void StopRecording() {
+        if(!is_recording_) return;
+        
+        file.close();
+        is_recording_ = false;
+        // Note: Removing 'network_ = nullptr;' as it's a reference and cannot be assigned nullptr.
     }
 
     void PauseRecording() {
-      pause_start_ = std::chrono::high_resolution_clock::now();
+        if(!is_recording_) return;
+        pause_start_ = std::chrono::high_resolution_clock::now();
     }
 
-    void ContinueRecording() {
-      time_on_statistics_ += 0.001 * (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - pause_start_).count());
+    void ResumeRecording() {
+        if(!is_recording_) return;
+        auto duration = std::chrono::high_resolution_clock::now() - pause_start_;
+        time_on_statistics_ += std::chrono::duration<double>(duration).count();
     }
 
-  private:
+private:
+    Network<T>& network_;
     std::chrono::time_point<std::chrono::high_resolution_clock> recording_start_;
-    long double time_on_statistics_;
-    TrafficAssignmentApproach<T>* traffic_assignment_approach_;
-    std::ofstream file;
-    std::filesystem::path file_path;
     std::chrono::time_point<std::chrono::high_resolution_clock> pause_start_;
-  };
-}
+    double time_on_statistics_;
+    bool is_recording_;
+    std::ofstream file;
+    std::string file_path_;
+    std::string dataset_name_;
+    std::string approach_name_;
+
+    void InitializeOutputFile() {
+        // Create results directory
+        const std::string dir_path = "../performance_results/" + dataset_name_;
+        std::filesystem::create_directories(dir_path);
+        
+        // Create unique filename
+        const auto now = std::chrono::system_clock::now();
+        const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now.time_since_epoch()).count();
+        
+        file_path_ = dir_path + "/" + approach_name_ + ".csv";
+        
+        // Write CSV header
+        file.open(file_path_, std::ios::out);
+        file << "RelativeGap,ObjectiveFunction,ElapsedTime(s)\n";
+        file.close();
+    }
+
+    void ResetTimers() {
+        time_on_statistics_ = 0.0;
+        recording_start_ = std::chrono::high_resolution_clock::now();
+    }
+
+    T GetElapsedTime() const {
+        auto elapsed = std::chrono::high_resolution_clock::now() - recording_start_;
+        double elapsed_seconds = std::chrono::duration<double>(elapsed).count();
+        return static_cast<T>(elapsed_seconds - time_on_statistics_);
+    }
+};
+
+} // namespace TrafficAssignment
 
 #endif

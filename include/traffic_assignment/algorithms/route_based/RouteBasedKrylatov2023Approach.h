@@ -8,9 +8,11 @@ namespace TrafficAssignment {
   template <typename T>
   class RouteBasedKrylatov2023Approach : public RouteBasedApproach <T> {
   public:
-    RouteBasedKrylatov2023Approach(std::string dataset_name, T alpha = 1e-14) :
-      RouteBasedApproach<T>(dataset_name, alpha) {
-      this->shift_method_ = new RouteBasedKrylatov2023ShiftMethod<T>(this->GetLinksRef(), this->GetOriginDestinationPairsRef());
+    RouteBasedKrylatov2023Approach(Network<T>& network, T alpha = 1e-14)
+      : RouteBasedApproach<T>(network, alpha) {
+        this->shift_method_ = new RouteBasedKrylatov2023ShiftMethod<T>(
+            network
+        );
     }
 
     ~RouteBasedKrylatov2023Approach() = default;

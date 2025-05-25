@@ -58,7 +58,7 @@ namespace TrafficAssignment {
      * @param temp_flow Flow value to compute delay for. Defaults to current flow.
      * @return Travel time (delay).
      */
-    T Delay(T temp_flow = -1) {
+    T Delay(T temp_flow = -1) const {
       if (temp_flow == -1) {
         temp_flow = flow;
       }
@@ -73,7 +73,7 @@ namespace TrafficAssignment {
      * @param temp_flow Upper limit of integration. Defaults to current flow.
      * @return Integral value (unit: vehicle-minutes).
      */
-    T DelayInteg(T temp_flow = -1) {
+    T DelayInteg(T temp_flow = -1) const {
       if (temp_flow == -1) {
         temp_flow = flow;
       }

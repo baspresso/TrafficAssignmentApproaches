@@ -5,6 +5,7 @@
 #include "../data/Link.h"
 #include "../data/OriginDestinationPair.h"
 #include <vector>
+#include <string>
 #include <unordered_map>
 #include <map>
 
@@ -16,7 +17,7 @@ namespace TrafficAssignment {
    * @tparam T Data type for flow/capacity values (e.g., double).
    */
 template <typename T>
-class Network {
+class Network : public std::enable_shared_from_this<Network<T>> {
 public:
 
     /**
@@ -28,12 +29,14 @@ public:
      * @param adjacency Forward adjacency list representation.
      * @param reverse_adjacency Reverse adjacency list representation.
      */
-    Network(int nodes, int zones,
+    Network(std::string name,
+            int nodes, int zones,
             std::vector<Link<T>> links,
             std::vector<std::vector<T>> trips,
             std::vector<std::vector<int>> adjacency,
             std::vector<std::vector<int>> reverse_adjacency)
-        : number_of_nodes_(nodes),
+        : name_(name),
+          number_of_nodes_(nodes),
           number_of_zones_(zones),
           links_(std::move(links)),
           adjacency_list_(std::move(adjacency)),
@@ -48,6 +51,8 @@ public:
     // Network metadata accessors
     // ---------------------------
     
+    std::string name() const noexcept { return name_; }
+
     /**
      * @brief Returns total number of nodes in the network.
      * @return Number of nodes as integer.
@@ -59,6 +64,12 @@ public:
      * @return Number of links as integer.
      */
     int number_of_od_pairs() const noexcept { return origin_destination_pairs_.size(); }
+
+    /**
+     * @brief Returns current number of zones in the network.
+     * @return Number of zones as integer.
+     */
+    int number_of_zones() const noexcept { return number_of_zones_; }
 
     // Core data accessors
     // -------------------
@@ -87,6 +98,8 @@ public:
      */
     const std::vector<std::vector<int>>& reverse_adjacency() const { return reverse_adjacency_list_; }
 
+    const std::vector<std::map<int, int>>& origin_info() const { return origin_info_; }
+    
     // Mutable accessors for algorithm manipulation
     // --------------------------------------------
     
@@ -113,7 +126,7 @@ public:
      * @return Vector of pairs containing OD pair index and corresponding shortest path.
      * @note Uses Dijkstra's algorithm with priority queue implementation.
      */
-    std::vector<std::pair<int, std::vector<int>>> SingleOriginBestRoutes(int origin) const {
+    std::vector<std::pair<int, std::vector<int>>> ComputeSingleOriginBestRoutes(int origin) const {
         std::priority_queue <std::pair <T, int>, std::vector <std::pair <T, int>>, std::greater <std::pair <T, int>>> q;
         std::vector <std::pair <int, std::vector <int>>> best_routes;
         int u;
@@ -158,7 +171,61 @@ public:
         return best_routes;
     }
 
+    void AddRoutes(const std::vector <std::pair <int, std::vector <int>>>& routes) {
+      for (auto now : routes) {
+        origin_destination_pairs_[now.first].AddNewRoute(now.second);
+      }
+    }
+
+    // Single-link update
+    void SetLinkFlow(int link_id, T delta) {
+        links_[link_id].flow += delta;
+    }
+
+    T ObjectiveFunction() const {
+      T total = 0;
+      for (const auto& link : links_) {
+          total += link.DelayInteg();
+      }
+      return total;
+    }
+
+    T CalculatePathDelay(const std::vector<int>& path) const {
+      T delay = 0;
+      for (int link_id : path) {
+        delay += links_[link_id].Delay();
+      }
+      return delay;
+    }
+
+    T RelativeGap() const {
+      T numerator = 0;
+      T denominator = 0;
+
+      // Calculate numerator (idealized system)
+      for (int origin = 0; origin < number_of_zones_; ++origin) {
+        auto best_routes = ComputeSingleOriginBestRoutes(origin);
+        for (const auto& [od_index, path] : best_routes) {
+          numerator += origin_destination_pairs_[od_index].GetDemand() * 
+                        CalculatePathDelay(path);
+        }
+      }
+
+      // Calculate denominator (current system)
+      for (const auto& link : links_) {
+        denominator += link.flow * link.Delay();
+      }
+
+      // Handle division by zero
+      if (denominator < std::numeric_limits<T>::epsilon()) {
+        return std::numeric_limits<T>::quiet_NaN();
+      }
+
+      return 1 - (numerator / denominator);
+    }
 private:
+    std::string name_;
+
     // Network topology properties
     const int number_of_nodes_;      ///< Total number of nodes in the network.
     const int number_of_zones_;      ///< Total number of traffic zones (origins/destinations).
@@ -180,6 +247,7 @@ private:
     void InitializeODPairs(const std::vector<std::vector<T>>& trips) {
       origin_destination_pairs_.clear();
       origin_destination_pairs_.reserve(number_of_zones_ * number_of_zones_);
+      origin_info_.resize(number_of_zones_);
 
       for(int origin = 0; origin < number_of_zones_; ++origin) {
           for(int dest = 0; dest < number_of_zones_; ++dest) {
@@ -188,13 +256,13 @@ private:
                       origin, 
                       dest, 
                       trips[origin][dest],
-                      links_,        // Now passed as const reference
-                      adjacency_list_
+                      *this
                   );
+                  origin_info_[origin][dest] = origin_destination_pairs_.size() - 1;
               }
           }
       }
-    }
+}
 
     /**
      * @brief Reconstructs route from destination back to origin.
@@ -203,7 +271,7 @@ private:
      * @param used_link Map of node-to-link connections from pathfinding.
      * @return Ordered list of link IDs from origin to destination.
      */
-    std::vector <int> RestoreRoute(int origin, int dest, const std::unordered_map <int, int>& used_link) {
+    std::vector <int> RestoreRoute(int origin, int dest, const std::unordered_map <int, int>& used_link) const {
         int now = dest;
         std::vector <int> new_route;
         while (now != origin) {

@@ -19,17 +19,14 @@ public:
 
     template <typename T>
     Network<T> BuildFromDataset(const std::string& dataset_name) {
+        std::string name = dataset_name;
         auto [nodes, zones, links] = LoadNetworkData<T>(dataset_name);
         auto trips = LoadTripData<T>(dataset_name, zones);
         auto [adjacency, reverse_adjacency] = BuildAdjacencyLists<T>(links, nodes);
         
-        return Network<T>(
-            nodes,
-            zones,
-            std::move(links),
-            std::move(trips),
-            std::move(adjacency),
-            std::move(reverse_adjacency)
+        return Network<T>(name, nodes, zones, 
+            links, trips, 
+            adjacency, reverse_adjacency
         );
     }
 

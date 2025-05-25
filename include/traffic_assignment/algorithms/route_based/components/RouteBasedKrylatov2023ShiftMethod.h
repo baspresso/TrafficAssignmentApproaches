@@ -10,108 +10,118 @@ namespace TrafficAssignment {
   template <typename T>
   class RouteBasedKrylatov2023ShiftMethod : public RouteBasedShiftMethod <T> {
     using MatrixXd = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+    
   public:
-    RouteBasedKrylatov2023ShiftMethod(std::vector <Link <T>>& links, std::vector <OriginDestinationPair <T>>& origin_destination_pairs) :
-      RouteBasedShiftMethod<T>(links, origin_destination_pairs) {}
+    explicit RouteBasedKrylatov2023ShiftMethod(Network<T>& network)
+        : RouteBasedShiftMethod<T>(network) {}
 
-    std::vector <T> FlowShift(int od_pair_index) {
-      int routes_count = this->origin_destination_pairs_[od_pair_index].GetRoutesCount();
-      std::vector <T> routes_flow = this->origin_destination_pairs_[od_pair_index].GetRoutesFlow();
-      MatrixXd flow_delta = (-1) * RoutesJacobiMatrix(od_pair_index).inverse() * (RoutesDelayColumn(od_pair_index) - EColumn(od_pair_index) * TargetDelay(od_pair_index));
-      std::vector <T> flow_shift(routes_count);
-
-      for (int i = 0; i < routes_count; i++) {
-        flow_shift[i] = routes_flow[i] + flow_delta(i, 0);
-      }
-      return flow_shift;
+    std::vector <T> FlowShift(int od_index) {
+      auto& od_pair = this->od_pairs()[od_index];
+      const int routes_count = od_pair.GetRoutesCount();
+        
+      MatrixXd flow_delta = CalculateFlowDelta(od_index);
+      return ApplyFlowUpdate(od_pair, flow_delta);
     }
 
   private:
-    MatrixXd RoutesJacobiMatrix(int od_pair_index) {
-      std::vector <std::vector <int>> routes = this->origin_destination_pairs_[od_pair_index].GetRoutes();
-      int routes_count = this->origin_destination_pairs_[od_pair_index].GetRoutesCount();
-      MatrixXd jacobi_matrix(routes_count, routes_count);
-      for (int i = 0; i < routes_count; i++) {
-        std::unordered_set <int> links_cur_route;
-        for (auto now : routes[i]) {
-          links_cur_route.insert(now);
+
+    MatrixXd CalculateFlowDelta(int od_index) {
+        MatrixXd J = RoutesJacobiMatrix(od_index);
+        MatrixXd delays = RoutesDelayColumn(od_index);
+        MatrixXd e = EColumn(od_index);
+        
+        return (-1) * J.inverse() * (delays - e * TargetDelay(od_index));
+    }
+    
+    std::vector<T> ApplyFlowUpdate(OriginDestinationPair<T>& od_pair, 
+                                    const MatrixXd& delta) {
+        std::vector<T> new_flows;
+        const auto& current_flows = od_pair.GetRoutesFlow();
+        
+        for(int i = 0; i < delta.rows(); ++i) {
+            new_flows.push_back(current_flows[i] + delta(i, 0));
         }
-        for (int j = 0; j < routes_count; j++) {
-          jacobi_matrix(i, j) = 0;
-          for (auto now : routes[j]) {
-            if (links_cur_route.count(now)) {
-              jacobi_matrix(i, j) += this->links_[now].DelayDer();
+        
+        return new_flows;
+    }
+
+    MatrixXd RoutesJacobiMatrix(int od_index) {
+
+      const auto& routes = this->GetODPair(od_index).GetRoutes();
+      MatrixXd J(routes.size(), routes.size());
+        
+      for(size_t i = 0; i < routes.size(); ++i) {
+        for(size_t j = 0; j < routes.size(); ++j) {
+          J(i,j) = CalculateJacobiElement(routes[i], routes[j]);
+        }
+      }
+      return J;
+    }
+
+    T CalculateJacobiElement(const std::vector<int>& route_i,
+                              const std::vector<int>& route_j) {
+        T sum = 0;
+        std::unordered_set<int> links_i(route_i.begin(), route_i.end());
+        
+        for(int link_id : route_j) {
+            if(links_i.count(link_id)) {
+                sum += this->links()[link_id].DelayDer();
             }
-          }
         }
-      }
-      return jacobi_matrix;
+        return sum;
     }
 
-    MatrixXd RoutesDelayColumn(int od_pair_index) {
-      std::vector <std::vector <int>> routes = this->origin_destination_pairs_[od_pair_index].GetRoutes();
-      int routes_count = this->origin_destination_pairs_[od_pair_index].GetRoutesCount();
-      MatrixXd delay_column(routes_count, 1);
-      for (int i = 0; i < routes_count; i++) {
-        delay_column(i, 0) = Link<T>::GetLinksDelay(this->links_, routes[i]);
+    MatrixXd RoutesDelayColumn(int od_index) {
+      const auto& routes = this->GetODPair(od_index).GetRoutes();
+      MatrixXd delays(routes.size(), 1);
+        
+      for(size_t i = 0; i < routes.size(); ++i) {
+        delays(i, 0) = this->CalculatePathCost(routes[i]);
       }
-      return delay_column;
+      return delays;
     }
 
-    MatrixXd EColumn(int od_pair_index) {
-      int routes_count = this->origin_destination_pairs_[od_pair_index].GetRoutesCount();
-      MatrixXd e(routes_count, 1);
-      for (int i = 0; i < routes_count; i++) {
-        e(i, 0) = 1;
-      }
-      return e;
+    MatrixXd EColumn(int od_index) {
+      const int size = this->GetODPair(od_index).GetRoutesCount();
+      return MatrixXd::Constant(size, 1, 1.0);
     }    
 
-    T CheckConstRouteDelay(int od_pair_index) {
-      std::vector <std::vector <int>> routes = this->origin_destination_pairs_[od_pair_index].GetRoutes();
-      for (const auto& route : routes) {
-        bool current_route_result = true;
-        for (const auto& now : route) {
-          if (this->links_[now].power != 0) {
-            current_route_result = false;
-          }
+    T TargetDelay(int od_index) {
+        if(HasConstantRoute(od_index)) {
+            return ConstantRouteDelay(od_index);
         }
-        if (current_route_result) {
-          return true;
-        }
-      }
-      return false;
+        return WeightedAverageDelay(od_index);
     }
 
-    T ConstRouteDelay(int od_pair_index) {
-      std::vector <std::vector <int>> routes = this->origin_destination_pairs_[od_pair_index].GetRoutes();
-      T result = 0;
-      for (const auto& route : routes) {
-        bool current_route_result = true;
-        for (const auto& now : route) {
-          if (this->links_[now].power != 0) {
-            current_route_result = false;
-          }
-        }
-        if (current_route_result) {
-          result = Link<T>::GetLinksDelay(this->links_, route);;
-        }
-      }
-      return result;
+    bool HasConstantRoute(int od_index) const {
+        const auto& routes = this->GetODPair(od_index).GetRoutes();
+        return std::any_of(routes.begin(), routes.end(), [this](const auto& route) {
+            return std::all_of(route.begin(), route.end(), [this](int link_id) {
+                return this->network_.links()[link_id].power == 0;
+            });
+        });
     }
 
-    T TargetDelay(int od_pair_index) {
-      T delay_const_route = ConstRouteDelay(od_pair_index);
-      if (CheckConstRouteDelay(od_pair_index)) {
-        return ConstRouteDelay(od_pair_index);
-      }
-      else {
-        MatrixXd e = EColumn(od_pair_index);
-        MatrixXd jacobi_inv = RoutesJacobiMatrix(od_pair_index).inverse();
-        return (e.transpose() * jacobi_inv * RoutesDelayColumn(od_pair_index))(0, 0) / (e.transpose() * jacobi_inv * e)(0, 0);
-      }
+    T ConstantRouteDelay(int od_index) const {
+        const auto& routes = this->GetODPair(od_index).GetRoutes();
+        for(const auto& route : routes) {
+            if(std::all_of(route.begin(), route.end(), [this](int link_id) {
+                return this->network_.links()[link_id].power == 0;
+            })) {
+                return this->CalculatePathCost(route);
+            }
+        }
+        return T(0);
     }
 
+    T WeightedAverageDelay(int od_index) {
+        MatrixXd J_inv = RoutesJacobiMatrix(od_index).inverse();
+        MatrixXd e = EColumn(od_index);
+        MatrixXd delays = RoutesDelayColumn(od_index);
+        
+        return (e.transpose() * J_inv * delays)(0, 0) / 
+               (e.transpose() * J_inv * e)(0, 0);
+    }
   };
 }
 

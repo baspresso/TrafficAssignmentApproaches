@@ -76,7 +76,6 @@ namespace TrafficAssignment {
           std::getline(metadata_ss, temp, ':'); // Skipping "NUMBER OF LINKS:"
           std::getline(metadata_ss, temp); number_of_links_ = std::stoi(temp);
         }
-        //std::cout << number_of_zones_ << ' ' << number_of_nodes_ << ' ' << number_of_links_ << '\n';
 
         links_.clear();
         std::getline(file, line);
@@ -99,8 +98,6 @@ namespace TrafficAssignment {
           std::getline(ss, temp); type = std::stoi(temp);
 
           links_.emplace_back(init, term, capacity, length, free_flow_time, b, power, speed, toll, type);
-
-          //std::cout << init << ' ' << term << ' ' << capacity << ' ' << length << ' ' << free_flow_time << ' ' << b << ' ' << power << ' ' << speed << ' ' << toll << ' ' << type << '\n';
         }
 
         file.close();
