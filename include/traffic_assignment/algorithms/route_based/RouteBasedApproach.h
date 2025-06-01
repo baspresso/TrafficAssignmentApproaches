@@ -30,7 +30,7 @@ namespace TrafficAssignment {
 
       this->statistics_recorder_.RecordStatistics();
 
-      while (iteration_count++ < 100) {
+      while (iteration_count++ < 200) {
         ResetExpectedDecreases();
         ProcessOrigins();
         ProcessODPairs();

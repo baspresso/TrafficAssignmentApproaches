@@ -8,23 +8,14 @@
 #include <memory>
 
 int main() {
-	// 1. Use NetworkBuilder to create a shared_ptr<Network>
 	TrafficAssignment::NetworkBuilder builder;
 	auto network = builder.BuildFromDataset<long double>("SiouxFalls"); // Returns shared_ptr
 
-	// 2. Pass the shared_ptr directly (no std::move needed)
-	//TrafficAssignment::RouteBasedKrylatov2023Approach<long double> approach(
-	//	network,  // Shared ownership
-	//	1e-14     // Alpha value (optional)
-	//);
-
-	TrafficAssignment::TapasLineSearchApproach<long double> approach(
-		network,  // Shared ownership
-		1e-14     // Alpha value (optional)
+	TrafficAssignment::PumpOutDemandBasedApproach<long double> approach(
+		network,
+		1e-14
 	);
 
-
-	// 3. Execute traffic assignment
 	approach.ComputeTrafficFlows();
 	//TrafficAssignment::RouteBasedKrylatov2023Approach<long double>("SiouxFalls").ComputeTrafficFlows();
 	//TrafficAssignment::TapasLineSearchApproach<long double>("SiouxFalls").ComputeTrafficFlows();

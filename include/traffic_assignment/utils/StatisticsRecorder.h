@@ -32,7 +32,9 @@ public:
     }
 
     void RecordStatistics() {
-        //if(!is_recording_ || !file.is_open()) return;
+        if(!is_recording_) return;
+        
+        PauseRecording();
 
         auto statistics_start = std::chrono::high_resolution_clock::now();
         
@@ -47,6 +49,8 @@ public:
              << elapsed << "\n";
         
         file.close();
+
+        ResumeRecording();
     }
 
     void StopRecording() {
@@ -103,7 +107,7 @@ private:
     }
 
     T GetElapsedTime() const {
-        auto elapsed = std::chrono::high_resolution_clock::now() - recording_start_;
+        auto elapsed = pause_start_ - recording_start_;
         double elapsed_seconds = std::chrono::duration<double>(elapsed).count();
         return static_cast<T>(elapsed_seconds - time_on_statistics_);
     }

@@ -99,7 +99,7 @@ namespace TrafficAssignment {
     TapasShiftMethod <T>* shift_method_;
 
     // 
-    const T computation_threshold_ = 1e-14;
+    const T computation_threshold_ = 1e-10;
 
     std::priority_queue <std::pair <T, int>> delta_pas_queue;
 
