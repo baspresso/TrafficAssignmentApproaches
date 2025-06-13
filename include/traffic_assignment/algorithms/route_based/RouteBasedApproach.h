@@ -102,6 +102,9 @@ namespace TrafficAssignment {
 
         for (int count = 0; count < full_iteration_count_; count++) {
             ProcessODQueue(od_queue);
+            if (count % 10 == 1) {
+                this->statistics_recorder_.RecordStatistics();
+            }
         }
     }
 

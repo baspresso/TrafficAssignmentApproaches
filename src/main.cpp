@@ -11,7 +11,7 @@ int main() {
 	TrafficAssignment::NetworkBuilder builder;
 	auto network = builder.BuildFromDataset<long double>("SiouxFalls"); // Returns shared_ptr
 
-	TrafficAssignment::PumpOutDemandBasedApproach<long double> approach(
+	TrafficAssignment::TapasLineSearchApproach<long double> approach(
 		network,
 		1e-14
 	);

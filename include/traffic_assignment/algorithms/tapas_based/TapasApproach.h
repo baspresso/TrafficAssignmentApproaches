@@ -56,6 +56,7 @@ namespace TrafficAssignment {
         now = this->network_.ObjectiveFunction();
         //std::cout << prev - now << ' ' << reserved_pas_hash_.size() << '\n';
       }
+      std::cout << 1 << '\n';
     }
 
   protected:
