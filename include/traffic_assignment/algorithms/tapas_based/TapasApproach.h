@@ -770,31 +770,16 @@ namespace TrafficAssignment {
         SingleOriginLinksPasConstruction(origin_index);
         for (int cnt = 0; cnt < 1; cnt++) {
           PasProcessing(false);
-          //this->AllPasOriginCheck();
-          //std::vector <int> pas_subset = GetPasSubset();
-          //for (auto pas_hash : origin_corresponding_pas_set_[origin_index]) {
-          //  pas_subset.push_back(pas_hash);
-          //}
-          //std::vector <int> pas_subset = GetPasSubset();
-          //for (auto pas_hash : pas_subset) {
-          //for (auto pas_hash : origin_corresponding_pas_set_[origin_index]) {
-          //  PasFLowShift(pas_hash, false);
-          //}
           this->statistics_recorder_.RecordStatistics();
         }
-        //cout << this->reserved_pas_hash_.size() << ' ' << this->ObjectiveFunction() << '\n';
         this->statistics_recorder_.RecordStatistics();
       }
       for (int cnt = 0; cnt < iteration_number * 5; cnt++) {
-        //std::vector <int> pas_subset = GetPasSubset();
         for (int i = 0; i < reserved_pas_hash_.size(); i++) {
-        //for (int i = 0; i < pas_subset.size(); i++) {
-          //PasFLowShift(pas_subset[i], true);
           PasProcessing(true);
         }
         this->statistics_recorder_.RecordStatistics();
       }
-      // cout << this->ObjectiveFunction() << '\n';
       this->statistics_recorder_.RecordStatistics();
     }
 

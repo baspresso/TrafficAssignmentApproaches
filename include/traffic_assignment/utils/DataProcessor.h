@@ -15,12 +15,7 @@ namespace TrafficAssignment {
     DataProcessor() = default;
 
     bool LoadData(const std::string& dataset_name) {
-      //std::filesystem::path current_path = std::filesystem::current_path();
       std::filesystem::path current_path = "C:/Projects/TrafficAssignmentApproaches";
-      //while (current_path.filename() != "out") {
-      //  current_path = current_path.parent_path();
-      //}
-      //current_path = current_path.parent_path();
       auto net_file_path = current_path / "data" / "TransportationNetworks" / dataset_name / (dataset_name + "_net.csv");
       auto trips_file_path = current_path / "data/" / "TransportationNetworks" / dataset_name / (dataset_name + "_trips.csv");
 

@@ -12,25 +12,7 @@ namespace TrafficAssignment {
   public:
     PumpOutDemandBasedApproach(Network<T>& network, T alpha = 1e-14) :
       TrafficAssignmentApproach<T>(network, alpha)  {
-
         InitializeFromNetwork();
-
-        /*
-        zone_node_demand_.resize(this->number_of_zones_, std::vector <T> (this->number_of_nodes_, 0));
-        //node_dest_demand_.resize(this->number_of_zones_, std::vector <T> (this->number_of_zones_, 0));
-        //node_dest_delay_estimation_.resize(this->number_of_nodes_, std::vector <T> (this->number_of_zones_, -1));
-        zone_link_flow_.resize(this->number_of_zones_, std::vector <T> (this->number_of_links_, 0));
-        zone_distances_.resize(this->number_of_zones_, std::vector <T> (this->number_of_nodes_, INF));
-        zone_processed_.resize(this->number_of_zones_, std::vector <bool> (this->number_of_nodes_, false));
-        zone_prev_node_.resize(this->number_of_zones_, std::vector <int> (this->number_of_nodes_, 0));
-        zone_used_link_.resize(this->number_of_zones_, std::vector <int> (this->number_of_nodes_, 0));
-        for (auto odp : this->origin_destination_pairs_) {
-          auto origin_dest = odp.GetOriginDestination();
-          zone_node_demand_[origin_dest.second][origin_dest.first] = odp.GetDemand();
-          //node_dest_demand_[origin_dest.second][origin_dest.first] = odp.GetDemand();
-        }
-        //std::cout << "Const_Finish\n";
-        */
     }
 
 
@@ -46,14 +28,10 @@ namespace TrafficAssignment {
         for (int zone_index = 0; zone_index < this->number_of_zones_; zone_index++) {
           ZoneProcessing(zone_index);
         }
-        //std::cout << "Statistics1\n";
         RecordStatistics();
-        //std::cout << "Statistics2\n";
         FlowPumpOut(1.0 / (iteration_count + 2));
       }
       FinishTransfer();
-      //FullFlowTransfer();
-      //std::cout << 12345 << ' ' <<  std::setprecision(20) << this->ObjectiveFunction() << ' ' << this->RelativeGap() << '\n';
     }
 
     std::string GetApproachName() override {
@@ -125,13 +103,8 @@ namespace TrafficAssignment {
       int mn_node_index = zone_prev_node_[zone_index][node_index];
       int mn_link_index = zone_used_link_[zone_index][node_index];
       T flow_amount = zone_node_demand_[zone_index][node_index] * pass_forward_coefficient;
-      //T flow_amount = node_dest_demand_[zone_index][node_index] * pass_forward_coefficient;
       zone_node_demand_[zone_index][node_index] -= flow_amount;
-      //node_dest_demand_[zone_index][node_index] -= flow_amount;
       zone_node_demand_[zone_index][mn_node_index] += flow_amount;
-      //node_dest_demand_[zone_index][mn_node_index] += flow_amount;
-
-      //this->links_[mn_link_index].flow += flow_amount;
       this->network_.SetLinkFlow(mn_link_index, flow_amount);
 
       zone_link_flow_[zone_index][mn_link_index] += flow_amount;
@@ -143,23 +116,15 @@ namespace TrafficAssignment {
 
     void PerformNodeFlowShift(int zone_index, int node_index, T delta, int mn_link_index, int mx_link_index,
       int mn_node_index, int mx_node_index) {
-      //std::cout << delta << ' ';
       delta = std::min(delta, zone_link_flow_[zone_index][mx_link_index]);
       delta = std::min(delta, zone_node_demand_[zone_index][mx_node_index]);
-      //std::cout << delta << '\n';
-      //delta = std::min(delta, node_dest_demand_[zone_index][mx_node_index]);
-
-      //this->links_[mx_link_index].flow -= delta;
       this->network_.SetLinkFlow(mx_link_index, -delta);
-      //this->links_[mn_link_index].flow += delta;
       this->network_.SetLinkFlow(mn_link_index, delta);
 
       zone_link_flow_[zone_index][mx_link_index] -= delta;
       zone_link_flow_[zone_index][mn_link_index] += delta;
       zone_node_demand_[zone_index][mx_node_index] -= delta;
-      //node_dest_demand_[zone_index][mx_node_index] -= delta;
       zone_node_demand_[zone_index][mn_node_index] += delta;
-      //node_dest_demand_[zone_index][mn_node_index] += delta;
     }
 
     void NodeFlowShift(int zone_index, int node_index) {
@@ -186,21 +151,10 @@ namespace TrafficAssignment {
         return;
       }
       T delta = (mx_dist - mx_dist) / (this->network_.links()[mx_link_index].DelayDer() + this->network_.links()[mn_link_index].DelayDer());
-      //T delta = std::min(T(1.0), this->links_[mx_link_index].flow);
-      //while ((delta < this->links_[mx_link_index].flow) &&
-      //  (zone_distances_[zone_index][mx_node_index] + this->links_[mx_link_index].Delay(this->links_[mx_link_index].flow - delta) >
-      //  zone_distances_[zone_index][mn_node_index] + this->links_[mn_link_index].Delay(this->links_[mn_link_index].flow + delta))) {
-      //  delta *= 2;
-      //}
-      //while (zone_distances_[zone_index][mx_node_index] + this->links_[mx_link_index].Delay(this->links_[mx_link_index].flow - delta) <
-      //zone_distances_[zone_index][mn_node_index] + this->links_[mn_link_index].Delay(this->links_[mn_link_index].flow + delta)) {
-      //  delta /= 2;
-      //}
       PerformNodeFlowShift(zone_index, node_index, delta, mn_link_index, mx_link_index, mn_node_index, mx_node_index);
     }
 
     void ZoneProcessing(int zone_index) {
-      //std::cout << "Processing " << 1 << '\n';
       std::priority_queue <std::pair <T, int>, std::vector <std::pair <T, int>>, std::greater <std::pair <T, int>>> pq;
       for (int i = 0; i < this->number_of_nodes_; i++) {
         zone_distances_[zone_index][i] = INF;
@@ -209,10 +163,6 @@ namespace TrafficAssignment {
         zone_used_link_[zone_index][i] = -1;
       }
 
-      //std::fill(zone_distances_[zone_index].begin(), zone_distances_[zone_index].end(), INF);
-      //std::fill(zone_processed_[zone_index].begin(), zone_processed_[zone_index].end(), false);
-      //std::fill(zone_prev_node_[zone_index].begin(), zone_prev_node_[zone_index].end(), -1);
-      //std::fill(zone_used_link_[zone_index].begin(), zone_used_link_[zone_index].end(), -1);
       pq.push({0, zone_index});
       //std::cout << "Processing " << 2 << '\n';
       zone_distances_[zone_index][zone_index] = 0;
@@ -225,18 +175,8 @@ namespace TrafficAssignment {
         }
         zone_processed_[zone_index][cur_node] = true;
         if (cur_node != zone_index) {
-          /*T flow_amount = k_ * node_dest_demand_[cur_node][zone_index];
-          node_dest_demand_[cur_node][zone_index] -= flow_amount;
-          node_dest_demand_[zone_prev_node_[zone_index][cur_node]][zone_index] += flow_amount;
-          this->links_[zone_used_link_[zone_index][cur_node]].flow += flow_amount;
-          zone_distances_[zone_index][cur_node] = zone_distances_[zone_index][zone_prev_node_[zone_index][cur_node]] +
-           this->links_[zone_used_link_[zone_index][cur_node]].Delay();
-           */
-          //std::cout << 1 << '\n';
           NodeProcessing(zone_index, cur_node, pass_forward_processing_coefficient_, node_iteration_processing_count_);
-          //std::cout << 2 << '\n';
         }
-        //std::cout << "Processing " << 22 << '\n';
         for (auto link_index : this->network_.reverse_adjacency()[cur_node]) {
           int next_node = this->network_.links()[link_index].init;
           if (zone_processed_[zone_index][next_node]) {
@@ -249,22 +189,18 @@ namespace TrafficAssignment {
             pq.push({zone_distances_[zone_index][next_node], next_node});
           }
         }
-        //std::cout << "Processing " << 23 << '\n';
       }
-      //std::cout << "Processing " << 3 << '\n';
     }
 
     void FlowPumpOut(T gamma) {
       for (int link_index = 0; link_index < this->number_of_links_; link_index++) {
         auto cur_flow = this->network_.links()[link_index].flow;
-        //this->links_[link_index].flow *= (1 - gamma);
         this->network_.SetLinkFlow(link_index, -cur_flow);
         this->network_.SetLinkFlow(link_index, cur_flow * (1 - gamma));
       }
       for (int zone_index = 0; zone_index < this->number_of_zones_; zone_index++) {
         for (int node_index = 0; node_index < this->number_of_nodes_; node_index++) {
           zone_node_demand_[zone_index][node_index] *= (1 - gamma);
-          //node_dest_demand_[zone_index][node_index] *= (1 - gamma);
         }
         for (int link_index = 0; link_index < this->number_of_links_; link_index++) {
           zone_link_flow_[zone_index][link_index] *= (1 - gamma);
@@ -273,7 +209,6 @@ namespace TrafficAssignment {
       for (auto odp : this->network_.od_pairs()) {
           auto origin_dest = odp.GetOriginDestination();
           zone_node_demand_[origin_dest.second][origin_dest.first] += gamma * odp.GetDemand();
-          //node_dest_demand_[origin_dest.second][origin_dest.first] += gamma * odp.GetDemand();
         }
     }
 
@@ -287,14 +222,11 @@ namespace TrafficAssignment {
       }
       FullFlowTransfer();
       this->statistics_recorder_.ResumeRecording();
-      //std::cout << 1 << '\n';
       this->statistics_recorder_.RecordStatistics();
 
       this->statistics_recorder_.PauseRecording();
       zone_node_demand_ = zone_node_demand_copy;
       for (int link_index = 0; link_index < this->number_of_links_; link_index++) {
-        //this->links_[i].flow = links_flow_copy[i];
-
         auto cur_flow = this->network_.links()[link_index].flow;
         this->network_.SetLinkFlow(link_index, -cur_flow);
         this->network_.SetLinkFlow(link_index, links_flow_copy[link_index]);  
@@ -311,10 +243,6 @@ namespace TrafficAssignment {
         zone_prev_node_[zone_index][i] = -1;
         zone_used_link_[zone_index][i] = -1;
       }
-      //std::fill(zone_distances_[zone_index].begin(), zone_distances_[zone_index].end(), INF);
-      //std::fill(zone_processed_[zone_index].begin(), zone_processed_[zone_index].end(), false);
-      //std::fill(zone_prev_node_[zone_index].begin(), zone_prev_node_[zone_index].end(), -1);
-      //std::fill(zone_used_link_[zone_index].begin(), zone_used_link_[zone_index].end(), -1);
       pq.push({0, zone_index});
       zone_distances_[zone_index][zone_index] = 0;
       while (!pq.empty()) {
@@ -331,8 +259,7 @@ namespace TrafficAssignment {
           int next_node = this->network_.links()[link_index].init;
           if (zone_processed_[zone_index][next_node]) {
             continue;
-          } 
-          //std::cout << zone_distances_[zone_index][next_node] << "!!!!" << zone_distances_[zone_index][cur_node] + this->links_[link_index].Delay() << '\n';  
+          }   
           if (zone_distances_[zone_index][next_node] > zone_distances_[zone_index][cur_node] +this->network_.links()[link_index].Delay()) {
             zone_distances_[zone_index][next_node] = zone_distances_[zone_index][cur_node] + this->network_.links()[link_index].Delay();
             zone_prev_node_[zone_index][next_node] = cur_node;
@@ -345,18 +272,11 @@ namespace TrafficAssignment {
         int cur_node = processing_order.top();
         processing_order.pop();
         zone_node_demand_[zone_index][zone_prev_node_[zone_index][cur_node]] += zone_node_demand_[zone_index][cur_node];
-        //node_dest_demand_[zone_prev_node_[zone_index][cur_node]][zone_index] += node_dest_demand_[cur_node][zone_index];
         this->network_.SetLinkFlow(zone_used_link_[zone_index][cur_node], zone_node_demand_[zone_index][cur_node]);
         zone_node_demand_[zone_index][cur_node] = 0;
         //node_dest_demand_[cur_node][zone_index] = 0;
       }
     }
-
-    //void FullChangeLinkFlow(int link_index, T new_flow) {
-    //  auto cur_flow = this->network_.links()[link_index].flow;
-    //  this->network_.SetLinkFlow(link_index, -cur_flow);
-    //  this->network_.SetLinkFlow(link_index, new_flow);
-    //}
 
     void FullFlowTransfer() {
       for (int zone_index = 0; zone_index < this->number_of_zones_; zone_index++) {
@@ -365,7 +285,6 @@ namespace TrafficAssignment {
     }
 
     void FinishTransfer() {
-      //std::cout << 1 << '\n';
       int finish_iteration = 100;
       while (finish_iteration--) {
         for (int zone_index = 0; zone_index < this->number_of_zones_; zone_index++) {
@@ -373,26 +292,7 @@ namespace TrafficAssignment {
         }
       }
       FullFlowTransfer();
-      //std::cout << 2 << '\n';
     }
-    /*void DelayEstimation() {
-      for (int node_index = 0; node_index < this->number_of_nodes_; node_index++) {
-        for (auto link_index : this->adjacency_list_[node_index]) {
-          for (int dest_index = 0; dest_index < this->number_of_zones_; dest_index++) {
-            if (node_dest_delay_estimation_[node_index][dest_index] == -1 &&
-                node_dest_delay_estimation_[this->links_[link_index].term][dest_index] != -1) {
-              node_dest_delay_estimation_[node_index][dest_index] =
-               node_dest_delay_estimation_[this->links_[link_index].term][dest_index] + this->links_[link_index].Delay();
-            }
-            else {
-              if (node_dest_delay_estimation_[this->links_[link_index].term][dest_index] != -1) {
-                node_dest_delay_estimation_[this->links_[link_index].term][dest_index] + this->links_[link_index].Delay();
-              }
-            }
-          } 
-        }
-      }
-    }*/
 
   };
 }
