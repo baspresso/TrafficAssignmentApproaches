@@ -11,15 +11,19 @@
 #include "../common/TrafficAssignmentApproach.h"
 #include "./components/TapasShiftMethod.h"
 #include "../../core/Network.h"
+#include "TapasShiftMethodFactory.h"
 
 namespace TrafficAssignment {
   template <typename T>
   class TapasApproach : public TrafficAssignmentApproach <T> {
   public:
-    TapasApproach(Network<T>& network, T alpha = 1e-6):
-      TrafficAssignmentApproach<T>::TrafficAssignmentApproach(network, alpha) {
+    TapasApproach(Network<T>& network,
+                  T alpha = 1e-6,
+                  std::string shift_method_name = "NewtonStep")
+      : TrafficAssignmentApproach<T>::TrafficAssignmentApproach(network, alpha) {
 
-      shift_method_ = nullptr;
+      shift_method_ = TapasShiftMethodFactory<T>::GetInstance().Create(shift_method_name, this->GetLinksRef());
+      this->shift_method_name_ = shift_method_name;
 
       for (int i = 0; i < this->network_.number_of_zones(); i++) {
         if (this->network_.origin_info()[i].size() > 0) {
@@ -41,9 +45,7 @@ namespace TrafficAssignment {
       }
     }
 
-    ~TapasApproach() {
-      delete shift_method_;
-    }
+    ~TapasApproach() = default;
 
     void ComputeTrafficFlows() {
       this->statistics_recorder_.StartRecording(this->GetApproachName());
@@ -56,10 +58,15 @@ namespace TrafficAssignment {
         now = this->network_.ObjectiveFunction();
         //std::cout << prev - now << ' ' << reserved_pas_hash_.size() << '\n';
       }
-      std::cout << 1 << '\n';
+    }
+    
+    std::string GetApproachName() override {
+      return "Tapas" + shift_method_name_;
     }
 
   protected:
+    std::string shift_method_name_;
+
     int number_of_origins_;
 
     // stores all index of every origin 
@@ -97,7 +104,8 @@ namespace TrafficAssignment {
     std::vector <std::unordered_set <int>> origin_corresponding_pas_set_;
 
     //
-    TapasShiftMethod <T>* shift_method_;
+    std::unique_ptr <TapasShiftMethod <T>> shift_method_;
+    //TapasShiftMethod <T>* shift_method_;
 
     // 
     const T computation_threshold_ = 1e-10;
@@ -661,9 +669,6 @@ namespace TrafficAssignment {
     // Flow shift under chosen PAS with "optimal" step size
     void PasFLowShift(const int pas_hash, bool elimination_flag) {
       //unordered_map <int> pas_users_to_ignore = PasUsersToIgnore(pas_hash);
-      //if (elimination_flag) {
-      //
-      //}
       std::pair <T, T> total_pas_flow = this->PasTotalAmountOfFlow(pas_hash);
       if (TryFullPasFlowShift(pas_hash, total_pas_flow, elimination_flag)) {
         return;
@@ -672,7 +677,6 @@ namespace TrafficAssignment {
         throw std::runtime_error("shift_method_ is not initialized");
       }
       std::pair <T, T> flow_shift = shift_method_->FlowShift(this->pas_flow_shift_starting_point_[pas_hash], this->reserved_pas_hash_[pas_hash], total_pas_flow);
-      //cout << flow_shift.first << ' ' << flow_shift.second << '\n';
       this->pas_flow_shift_starting_point_[pas_hash] = abs(flow_shift.first);
       ImplementPasFlowShift(pas_hash, flow_shift, total_pas_flow);
     }
@@ -765,7 +769,7 @@ namespace TrafficAssignment {
       std::mt19937 g(rd());
       std::shuffle(origin_order.begin(), origin_order.end(), g);
       for (int origin_index : origin_order) {
-        SingleOriginRemoveAllCyclicFlows(origin_index);
+        //SingleOriginRemoveAllCyclicFlows(origin_index);
         BuildSingleOriginLeastCostRoutesTree(origin_index);
         SingleOriginLinksPasConstruction(origin_index);
         for (int cnt = 0; cnt < 1; cnt++) {
