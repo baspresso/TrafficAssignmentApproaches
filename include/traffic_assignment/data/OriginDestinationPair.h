@@ -99,8 +99,8 @@ public:
    */
   T GetZeroCapacityRouteDelay() {
     for (int i = 0; i < this->routes_.size(); i++) {
-      if (!Link<T>::CheckNonZeroLinksCapacity(this->links_, this->routes_[i])) {
-        return Link<T>::GetLinksDelay(this->links_, this->routes_[i]);
+      if (!Link<T>::CheckNonZeroLinksCapacity(this->network_.links(), this->routes_[i])) {
+        return Link<T>::GetLinksDelay(this->network_.links(), this->routes_[i]);
       }
     }
     return -1;

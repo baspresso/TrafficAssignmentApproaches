@@ -5,22 +5,24 @@
 #include <string>
 #include "../common/TrafficAssignmentApproach.h"
 #include "./components/RouteBasedShiftMethod.h"
+#include "RouteBasedShiftMethodFactory.h"
 #include <random>
 
 namespace TrafficAssignment {
   template <typename T>
   class RouteBasedApproach : public TrafficAssignmentApproach <T> {
   public:
-    RouteBasedApproach(Network<T>& network, T alpha = 1e-14)
-      : TrafficAssignmentApproach<T>(network, alpha) 
+    RouteBasedApproach(Network<T>& network,
+                       T alpha = 1e-14,
+                       std::string shift_method_name = "Krylatov2023")
+      : TrafficAssignmentApproach<T>::TrafficAssignmentApproach(network, alpha) 
     {
-        InitializeShiftMethod();
+        shift_method_ = RouteBasedShiftMethodFactory<T>::GetInstance().Create(shift_method_name, this->network_);
+        shift_method_name_ = shift_method_name;
         InitializeState();
     }
 
-    ~RouteBasedApproach() {
-      delete shift_method_;
-    }
+    ~RouteBasedApproach() = default;
 
     void ComputeTrafficFlows() override { 
       this->statistics_recorder_.StartRecording(this->GetApproachName());
@@ -42,12 +44,9 @@ namespace TrafficAssignment {
     const int full_iteration_count_ = 3;
     const int origin_iteration_count_ = 1;
     const T alpha_ = 0.7;
-    RouteBasedShiftMethod <T>* shift_method_;
+    std::unique_ptr <RouteBasedShiftMethod <T>> shift_method_;
+    std::string shift_method_name_;
     std::vector <T> objective_function_expected_decrease_;
-
-    void InitializeShiftMethod() {
-        shift_method_ = nullptr;
-    }
 
     void InitializeState() {
         objective_function_expected_decrease_.resize(
@@ -166,6 +165,10 @@ namespace TrafficAssignment {
         }
         
         return total;
+    }
+
+    std::string GetApproachName() override {
+      return "RouteBased" + shift_method_name_;
     }
   };
 }
