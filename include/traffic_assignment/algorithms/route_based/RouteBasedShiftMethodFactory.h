@@ -7,6 +7,7 @@
 #include <functional>
 #include "components/RouteBasedShiftMethod.h"
 #include "components/RouteBasedKrylatov2023ShiftMethod.h"
+#include "components/RouteBasedNewtonStepShiftMethod.h"
 
 namespace TrafficAssignment {
 
@@ -30,6 +31,7 @@ public:
     
   void RegisterAll() {
     REGISTER_SHIFT_METHOD("Krylatov2023", RouteBasedKrylatov2023ShiftMethod);
+    REGISTER_SHIFT_METHOD("NewtonStep", RouteBasedNewtonStepShiftMethod);
   }
     
   void Register(const std::string& name, Creator creator) {

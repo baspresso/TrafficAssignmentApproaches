@@ -132,8 +132,11 @@ namespace TrafficAssignment {
     void ExecuteFlowShift(int od_index) {
         auto& od_pair = this->network().mutable_od_pairs()[od_index];
         const auto routes = od_pair.GetRoutes();
-        
         const T before = CalculateRoutesObjective(routes);
+        if (this->network().od_pairs()[od_index].GetRoutesCount() == 1) {
+            UpdateExpectedDecrease(od_index, before, CalculateRoutesObjective(routes));
+            return;
+        }
         const auto flow_shift = shift_method_->FlowShift(od_index);
         od_pair.SetRoutesFlow(flow_shift);
         

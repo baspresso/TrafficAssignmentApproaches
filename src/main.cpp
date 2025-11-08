@@ -10,17 +10,17 @@ int main() {
 	TrafficAssignment::NetworkBuilder builder;
 	auto network = builder.BuildFromDataset<long double>("SiouxFalls");
 
-	TrafficAssignment::TapasApproach<long double> approach(
-		network,
-		1e-14,
-		"LineSearch"
-	);
-
-	// TrafficAssignment::RouteBasedApproach<long double> approach(
+	// TrafficAssignment::TapasApproach<long double> approach(
 	// 	network,
 	// 	1e-14,
-	// 	"Krylatov2023"
+	// 	"LineSearch"
 	// );
+
+	TrafficAssignment::RouteBasedApproach<long double> approach(
+		network,
+		1e-14,
+		"NewtonStep"
+	);
 
 	approach.ComputeTrafficFlows();
 
