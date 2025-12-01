@@ -24,19 +24,25 @@ namespace TrafficAssignment {
 
     ~RouteBasedApproach() = default;
 
-    void ComputeTrafficFlows() override { 
-      this->statistics_recorder_.StartRecording(this->GetApproachName());
+    void ComputeTrafficFlows(bool statistics_recording = false) override { 
+      if (statistics_recording) {
+        this->statistics_recorder_.StartRecording(this->GetApproachName());
+      }
       int iteration_count = 0;
 
       InitializeRoutes();
-
-      this->statistics_recorder_.RecordStatistics();
+      
+      if (statistics_recording) {
+        this->statistics_recorder_.RecordStatistics();
+      }
 
       while (iteration_count++ < 200) {
         ResetExpectedDecreases();
         ProcessOrigins();
-        ProcessODPairs();
-        this->statistics_recorder_.RecordStatistics();
+        ProcessODPairs(statistics_recording);
+        if (statistics_recording) {
+          this->statistics_recorder_.RecordStatistics();
+        }
       }
     }
 
@@ -95,14 +101,16 @@ namespace TrafficAssignment {
         }
     }
 
-    void ProcessODPairs() {
+    void ProcessODPairs(bool statistics_recording) {
         auto od_queue = PrepareODQueue();
         if (od_queue.empty()) return;
 
         for (int count = 0; count < full_iteration_count_; count++) {
             ProcessODQueue(od_queue);
             if (count % 10 == 1) {
-                this->statistics_recorder_.RecordStatistics();
+                if (statistics_recording) {
+                  this->statistics_recorder_.RecordStatistics();
+                }
             }
         }
     }

@@ -22,7 +22,7 @@ namespace TrafficAssignment {
     const int type;           ///< Link type/category (e.g., highway, arterial).
 
     // BPR function parameters
-    const T capacity;         ///< Maximum flow capacity (vehicles/hour).
+    T capacity;        
     const T length;           ///< Physical length of the link (km/miles).
     const T free_flow_time;   ///< Travel time under free-flow conditions (minutes).
     const T b;                ///< BPR scaling factor (typical value: 0.15).

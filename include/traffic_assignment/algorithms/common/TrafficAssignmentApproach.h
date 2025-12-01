@@ -23,7 +23,7 @@ namespace TrafficAssignment {
     
     virtual std::string GetApproachName() = 0;
 
-    virtual void ComputeTrafficFlows() = 0;
+    virtual void ComputeTrafficFlows(bool statistics_recording = false) = 0;
 
     Network<T>& network() { return network_; }
 

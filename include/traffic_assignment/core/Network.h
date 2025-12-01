@@ -42,7 +42,8 @@ public:
           adjacency_list_(std::move(adjacency)),
           reverse_adjacency_list_(std::move(reverse_adjacency)) 
     {
-        InitializeODPairs(trips);
+      InitializeLinkIDMap();
+      InitializeODPairs(trips);
     }
 
     /// @brief Default destructor (uses default container destruction).
@@ -101,6 +102,10 @@ public:
     const std::vector<std::vector<int>>& reverse_adjacency() const { return reverse_adjacency_list_; }
 
     const std::vector<std::map<int, int>>& origin_info() const { return origin_info_; }
+
+    std::size_t link_id(std::size_t init_node, std::size_t term_node) {
+      return link_id_map_[{init_node, term_node}];
+    }
     
     // Mutable accessors for algorithm manipulation
     // --------------------------------------------
@@ -192,6 +197,14 @@ public:
       return total;
     }
 
+    T TotalTravelTime() {
+      T total_travel_time = 0;
+      for (auto now : links_) {
+        total_travel_time += now.flow * now.Delay();
+      }
+      return total_travel_time;
+    }
+
     T CalculatePathDelay(const std::vector<int>& path) const {
       T delay = 0;
       for (int link_id : path) {
@@ -234,6 +247,7 @@ private:
 
     // Graph structure components
     std::vector<Link<T>> links_;                ///< All links in the transportation network.
+    std::map <std::pair <int, int>, std::size_t> link_id_map_;
     std::vector<std::vector<int>> adjacency_list_;       ///< Adjacency list for forward graph traversal.
     std::vector<std::vector<int>> reverse_adjacency_list_; ///< Reverse adjacency list for backward traversal.
 
@@ -264,7 +278,14 @@ private:
               }
           }
       }
-}
+
+    }
+
+    void InitializeLinkIDMap() {
+      for (int i = 0; i < links_.size(); i++) {
+        link_id_map_[{links_[i].init, links_[i].term}] = i;
+      }
+    }
 
     /**
      * @brief Reconstructs route from destination back to origin.
