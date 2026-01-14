@@ -11,7 +11,7 @@
 
 namespace TrafficAssignment {
 
-#define REGISTER_SHIFT_METHOD(name, class_name) \
+#define REGISTER_ROUTE_BASED_SHIFT_METHOD(name, class_name) \
   Register(name, [](Network<T>& network) { \
     return std::make_unique<class_name<T>>(network); \
   })
@@ -30,8 +30,8 @@ public:
   }
     
   void RegisterAll() {
-    //REGISTER_SHIFT_METHOD("Krylatov2023", RouteBasedKrylatov2023ShiftMethod);
-    REGISTER_SHIFT_METHOD("NewtonStep", RouteBasedNewtonStepShiftMethod);
+    //REGISTER_ROUTE_BASED_SHIFT_METHOD("Krylatov2023", RouteBasedKrylatov2023ShiftMethod);
+    REGISTER_ROUTE_BASED_SHIFT_METHOD("NewtonStep", RouteBasedNewtonStepShiftMethod);
   }
     
   void Register(const std::string& name, Creator creator) {

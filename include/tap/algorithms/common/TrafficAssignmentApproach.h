@@ -25,6 +25,10 @@ namespace TrafficAssignment {
 
     virtual void ComputeTrafficFlows(bool statistics_recording = false) = 0;
 
+    void Reset() {
+      network_.Reset();
+    }
+
     Network<T>& network() { return network_; }
 
     protected:

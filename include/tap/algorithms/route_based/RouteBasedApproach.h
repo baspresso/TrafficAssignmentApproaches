@@ -14,8 +14,8 @@ namespace TrafficAssignment {
   public:
     RouteBasedApproach(Network<T>& network,
                        T alpha = 1e-14,
-                       std::string shift_method_name = "Krylatov2023")
-      : TrafficAssignmentApproach<T>::TrafficAssignmentApproach(network, alpha) 
+                       std::string shift_method_name = "NewtonStep")
+      : TrafficAssignmentApproach<T>(network, alpha) 
     {
         shift_method_ = RouteBasedShiftMethodFactory<T>::GetInstance().Create(shift_method_name, this->network_);
         shift_method_name_ = shift_method_name;
@@ -176,6 +176,10 @@ namespace TrafficAssignment {
         }
         
         return total;
+    }
+
+    void Reset() {
+        std::fill(objective_function_expected_decrease_.begin(), objective_function_expected_decrease_.end(), 0);
     }
 
     std::string GetApproachName() override {

@@ -165,57 +165,63 @@ public:
     if (routes_.size() == 1) {
         // Assign full demand to the first route
         routes_flow_[0] = demand_;
-        
         // Update network flows and track contributions
         for (int link_id : new_route) {
-            network_.SetLinkFlow(link_id, demand_);
-            links_flow_[link_id] = demand_;
+          network_.SetLinkFlow(link_id, demand_);
+          links_flow_[link_id] = demand_;
         }
     }
     else {
         // Initialize new links in the route with zero contribution
         for (int link_id : new_route) {
-            if (!links_flow_.count(link_id)) {
-                links_flow_[link_id] = 0;
-            }
+          if (!links_flow_.count(link_id)) {
+            links_flow_[link_id] = 0;
+          }
         }
     }
 
     return true;
-}
-    T RoutesDelta() {
-      T delay_min = MAX_ROUTE_DELAY, delay_max = 0, delay_route = 0;
-      if (routes_.size() > 0) {
-        delay_route = Link<T>::GetLinksDelay(network_.links(), routes_[0]);
-        delay_min = delay_route;
-        delay_max = delay_route;
-      }
-      for (int i = 1; i < routes_.size(); i++) {
-        delay_route = Link<T>::GetLinksDelay(network_.links(), routes_[i]);
-        delay_min = std::min(delay_min, delay_route);
-        delay_max = std::max(delay_max, delay_route);
-      }
-      return abs(delay_max - delay_min);
+  }
+  T RoutesDelta() {
+    T delay_min = MAX_ROUTE_DELAY, delay_max = 0, delay_route = 0;
+    if (routes_.size() > 0) {
+      delay_route = Link<T>::GetLinksDelay(network_.links(), routes_[0]);
+      delay_min = delay_route;
+      delay_max = delay_route;
     }
-
-    std::vector <T> RoutesDelays() {
-      std::vector <T> routes_delays(routes_.size());
-      for (int i = 0; i < routes_.size(); i++) {
-        routes_delays[i] = Link<T>::GetLinksDelay(network_.links(), routes_[i]);
-      }
-      return routes_delays;
+    for (int i = 1; i < routes_.size(); i++) {
+      delay_route = Link<T>::GetLinksDelay(network_.links(), routes_[i]);
+      delay_min = std::min(delay_min, delay_route);
+      delay_max = std::max(delay_max, delay_route);
     }
+    return abs(delay_max - delay_min);
+  }
 
-    bool CheckNonZeroCapacityRoutes() {
-      bool fl = true;
-      for (int i = 0; i < this->routes_.size(); i++) {
-        if (!Link<T>::CheckNonZeroLinksCapacity(network_.links(), this->routes_[i])) {
-          fl = false;
-        }
-      }
-      return fl;
+  std::vector <T> RoutesDelays() {
+    std::vector <T> routes_delays(routes_.size());
+    for (int i = 0; i < routes_.size(); i++) {
+      routes_delays[i] = Link<T>::GetLinksDelay(network_.links(), routes_[i]);
     }
+    return routes_delays;
+  }
 
+  bool CheckNonZeroCapacityRoutes() {
+    bool fl = true;
+    for (int i = 0; i < this->routes_.size(); i++) {
+      if (!Link<T>::CheckNonZeroLinksCapacity(network_.links(), this->routes_[i])) {
+        fl = false;
+      }
+    }
+    return fl;
+  }
+
+  void Reset() {
+    routes_.clear();
+    routes_flow_.clear();
+    for (auto& [key, value] : links_flow_) {
+      value = 0;
+    }
+  }
   private:
     // Core data members
     int origin_, dest_; ///< Node IDs for origin and destination

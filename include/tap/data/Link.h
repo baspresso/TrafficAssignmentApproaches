@@ -4,7 +4,8 @@
 #include <vector>
 #include <iostream>
 #include <cmath>
-
+#include <unordered_set>
+#include <Eigen/Dense>
 
 namespace TrafficAssignment {
 
@@ -155,6 +156,16 @@ namespace TrafficAssignment {
       return ans;
     }
     
+    T DelayCapacityDer(T temp_flow = -1) const {
+      if (temp_flow == -1) {
+        temp_flow = flow;
+      }
+      if (capacity == 0 || b == 0) {
+        return 0;
+      }
+      return -power * b * free_flow_time * std::pow(temp_flow / capacity, power) / capacity;
+    }
+
     /**
      * @brief Checks if any link in a list has non-zero capacity.
      * @param links Vector of all links in the network.
@@ -171,6 +182,33 @@ namespace TrafficAssignment {
       return ans;
     }
   };
+
+  template <typename T>
+  T CalculateJacobiElement(const std::vector<int>& route_i,
+                           const std::vector<int>& route_j,
+                           std::vector <Link<T>>& links) {
+    T sum = 0;
+    std::unordered_set<int> links_i(route_i.begin(), route_i.end());
+    
+    for(int link_id : route_j) {
+        if (links_i.count(link_id)) {
+          sum += links[link_id].DelayDer();
+        }
+    }
+    return sum;
+  }
+
+  template <typename T>
+  Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> RoutesJacobiMatrix(const std::vector<std::vector <int>>& routes, std::vector <Link<T>>& links) {
+    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> J(routes.size(), routes.size());
+      
+    for(size_t i = 0; i < routes.size(); ++i) {
+      for(size_t j = 0; j < routes.size(); ++j) {
+        J(i,j) = CalculateJacobiElement(routes[i], routes[j], links);
+      }
+    }
+    return J;
+  }
 }
 
 #endif

@@ -238,6 +238,16 @@ public:
 
       return 1 - (numerator / denominator);
     }
+
+    void Reset() {
+      for (auto& link : links_) {
+        link.flow = 0;
+      }
+      for (auto& od_pair : origin_destination_pairs_) {
+        od_pair.Reset();
+      }
+    }
+
 private:
     std::string name_;
 

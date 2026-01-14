@@ -12,7 +12,7 @@
 
 namespace TrafficAssignment {
 
-#define REGISTER_SHIFT_METHOD(name, class_name) \
+#define REGISTER_TAPAS_SHIFT_METHOD(name, class_name) \
   Register(name, [](const std::vector<Link<T>>& links) { \
     return std::make_unique<class_name<T>>(links); \
   })
@@ -31,8 +31,8 @@ public:
   }
     
   void RegisterAll() {
-    REGISTER_SHIFT_METHOD("NewtonStep", TapasNewtonStepShiftMethod);
-    REGISTER_SHIFT_METHOD("LineSearch", TapasLineSearchShiftMethod);    
+    REGISTER_TAPAS_SHIFT_METHOD("NewtonStep", TapasNewtonStepShiftMethod);
+    REGISTER_TAPAS_SHIFT_METHOD("LineSearch", TapasLineSearchShiftMethod);    
   }
     
   void Register(const std::string& name, Creator creator) {
