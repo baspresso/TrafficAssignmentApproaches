@@ -26,7 +26,7 @@ int main() {
   auto constraints = loader.LoadFromFile("C:/Projects/TrafficAssignmentApproaches/data/TransportationNetworks/SiouxFalls/SiouxFalls_constraints.csv");
 
   std::cout << "Creating BilevelCND solver..." << std::endl;
-  TrafficAssignment::BilevelCND  <long double> cnd(network, approach, constraints, 1000);
+  TrafficAssignment::BilevelCND  <long double> cnd(network, approach, constraints, 0, 40);
   std::cout << "      BilevelCND solver created" << std::endl;
   std::cout << "      Design variables: " << constraints.size() << std::endl;
 
