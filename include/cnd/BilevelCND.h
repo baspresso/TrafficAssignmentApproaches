@@ -11,6 +11,8 @@
 #include <iostream>
 #include <iomanip>
 #include <cmath>
+#include <chrono>
+#include <sstream>
 #include "../tap/utils/DataProcessor.h"
 #include "../tap/algorithms/common/TrafficAssignmentApproach.h"
 #include "../tap/core/Network.h"
@@ -39,13 +41,13 @@ public:
     Network<T>& network,
     std::shared_ptr<TrafficAssignmentApproach<T>> approach,
     const std::vector<DirectedLinkCapacityConstraint>& constraints,
-    int max_standard_iterations = 10000,
+    int max_standard_iterations = 1000,
     int max_optimality_condition_iterations = 40,
     T optimization_tolerance = 1e-4,
     T link_capacity_selection_threshold = 1e-3,
     T budget_threshold = 1e-1,
     T budget_function_multiplier = 5,
-    double budget_upper_bound = 40000,
+    double budget_upper_bound = 100000,
     nlopt::algorithm optimization_algorithm = nlopt::LN_COBYLA
   )
     : network_(network),
@@ -62,7 +64,13 @@ public:
       verbose_(true),
       objective_value_(std::numeric_limits<double>::max()),
       total_travel_time_(0.0),
-      total_investment_cost_(0.0) {}
+      total_investment_cost_(0.0),
+      standard_objective_eval_count_(0),
+      standard_total_eval_target_(0),
+      standard_progress_active_(false),
+      optimality_condition_iteration_count_(0),
+      optimality_condition_total_iterations_(0),
+      optimality_condition_progress_active_(false) {}
 
   /**
    * @brief Destructor
@@ -73,7 +81,7 @@ public:
    * @brief Compute the optimal network design
    * @return std::pair with optimal capacities and minimum objective value
    */
-  std::pair<std::vector<double>, T> ComputeNetworkDesign() {
+  void ComputeNetworkDesign() {
     if (verbose_) {
       std::cout << "\n" << std::string(70, '=') << std::endl;
       std::cout << "BILEVEL CONTINUOUS NETWORK DESIGN PROBLEM" << std::endl;
@@ -86,47 +94,15 @@ public:
       std::cout << "  Max standard iterations: " << max_standard_iterations_ << std::endl;
       std::cout << "  Max optimality condition iterations: " << max_optimality_condition_iterations_ << std::endl;
     }
-
+    const auto optimization_start_time = std::chrono::steady_clock::now();
     initial_guess_.resize(constraints_.size());
     for (std::size_t i = 0; i < constraints_.size(); ++i) {
       initial_guess_[i] = constraints_[i].lower_bound;
       network_.mutable_links()[i].capacity = initial_guess_[i];
     }
-    std::vector<double> x(initial_guess_.begin(), initial_guess_.end());
-    if (max_standard_iterations_ > 0) {
-      int n_vars = static_cast<int>(constraints_.size());
-      nlopt::opt optimizer(optimization_algorithm_, n_vars);
 
-      optimizer.set_min_objective(&BilevelCND<T>::NLOptObjectiveFunctionWrapper, this);
-
-      std::vector<double> lower_bounds(n_vars);
-      std::vector<double> upper_bounds(n_vars);
-
-      for (int i = 0; i < n_vars; ++i) {
-        lower_bounds[i] = constraints_[i].lower_bound;
-        upper_bounds[i] = constraints_[i].upper_bound; 
-      }
-
-      optimizer.set_maxeval(max_standard_iterations_);
-
-      optimizer.set_lower_bounds(lower_bounds);
-      optimizer.set_upper_bounds(upper_bounds);
-
-      double constraint_tol = 1e-4;
-      
-      optimizer.add_inequality_constraint(
-        &BilevelCND<T>::BudgetConstraintWrapper,
-        this,
-        constraint_tol
-      );
-      
-      double minf;
-      optimizer.optimize(x, minf);
-
-      for (unsigned i = 0; i < network_.number_of_links(); i++) {
-        network_.mutable_links()[i].capacity = x[i];
-      }
-    }
+    std::cout << "StandardOptimization-start\n";
+    StandardOptimization();
     approach_->Reset();
     approach_->ComputeTrafficFlows();
 
@@ -141,11 +117,26 @@ public:
     approach_->ComputeTrafficFlows();
 
     std::cout << Budget() << '\n';
+    const auto optimization_end_time = std::chrono::steady_clock::now();
+    const double optimization_elapsed_seconds =
+      std::chrono::duration<double>(optimization_end_time - optimization_start_time).count();
+    std::ostringstream timing_line;
+    double total_travel_time = network_.TotalTravelTime();
+    double budget_function = static_cast<double>(Budget());
+    double objective_function = total_travel_time + budget_function;
+    timing_line << "optimization_time = "
+                << std::fixed << std::setprecision(2)
+                << optimization_elapsed_seconds << "s " << std::setprecision(10)
+                << "objective_function=" << objective_function
+                << " total_travel_time=" << total_travel_time
+                << " budget_function=" << budget_function << "\n";
+    std::cout << timing_line.str();
+
+    std::cout << "RecordStatistics-Start\n";
 
     RecordStatistics();
 
-    std::cout << "OptimalityCondition-End\n";
-    return {x, network_.TotalTravelTime()};
+    std::cout << "RecordStatistics-End\n";
   }
 
 private:
@@ -168,6 +159,183 @@ private:
   T objective_value_;
   T total_travel_time_;
   T total_investment_cost_;
+  int standard_objective_eval_count_;
+  int standard_total_eval_target_;
+  std::chrono::steady_clock::time_point standard_optimization_start_time_;
+  bool standard_progress_active_;
+  int optimality_condition_iteration_count_;
+  int optimality_condition_total_iterations_;
+  std::chrono::steady_clock::time_point optimality_condition_start_time_;
+  bool optimality_condition_progress_active_;
+
+  void StartStandardOptimizationProgress() {
+    standard_objective_eval_count_ = 0;
+    standard_total_eval_target_ = max_standard_iterations_;
+    standard_optimization_start_time_ = std::chrono::steady_clock::now();
+    standard_progress_active_ = standard_total_eval_target_ > 0;
+  }
+
+  void FinishStandardOptimizationProgress() {
+    if (!standard_progress_active_) {
+      return;
+    }
+    std::cout << '\n';
+    standard_progress_active_ = false;
+  }
+
+  void PrintStandardOptimizationProgress(double objective_function,
+                                         double total_travel_time,
+                                         double budget_function) {
+    if (!standard_progress_active_) {
+      return;
+    }
+
+    ++standard_objective_eval_count_;
+    int total = std::max(1, standard_total_eval_target_);
+    int current = std::min(standard_objective_eval_count_, total);
+    int left = std::max(0, total - current);
+
+    constexpr int kBarWidth = 30;
+    double ratio = static_cast<double>(current) / static_cast<double>(total);
+    int filled = static_cast<int>(ratio * kBarWidth);
+
+    std::string bar;
+    bar.reserve(kBarWidth);
+    for (int i = 0; i < kBarWidth; ++i) {
+      if (i < filled) {
+        bar.push_back('=');
+      } else if (i == filled && filled < kBarWidth) {
+        bar.push_back('>');
+      } else {
+        bar.push_back(' ');
+      }
+    }
+
+    auto now = std::chrono::steady_clock::now();
+    double elapsed = std::chrono::duration<double>(now - standard_optimization_start_time_).count();
+    double it_per_sec = elapsed > 0.0 ? static_cast<double>(current) / elapsed : 0.0;
+
+    std::ostringstream progress_line;
+    progress_line << '\r'
+                  << std::setw(3) << static_cast<int>(ratio * 100.0) << "%|"
+                  << bar << "| "
+                  << current << "/" << total
+                  << " left:" << left
+                  << " [" << std::fixed << std::setprecision(2) << it_per_sec << "it/s] "
+                  << std::defaultfloat
+                  << "objective_function=" << objective_function
+                  << " total_travel_time=" << total_travel_time
+                  << " budget_function=" << budget_function;
+    std::cout << progress_line.str() << std::flush;
+  }
+
+  void StartOptimalityConditionProgress() {
+    optimality_condition_iteration_count_ = 0;
+    optimality_condition_total_iterations_ = max_optimality_condition_iterations_;
+    optimality_condition_start_time_ = std::chrono::steady_clock::now();
+    optimality_condition_progress_active_ = optimality_condition_total_iterations_ > 0;
+  }
+
+  void FinishOptimalityConditionProgress() {
+    if (!optimality_condition_progress_active_) {
+      return;
+    }
+    std::cout << '\n';
+    optimality_condition_progress_active_ = false;
+  }
+
+  void PrintOptimalityConditionProgress(double objective_function,
+                                        double total_travel_time,
+                                        double budget_function) {
+    if (!optimality_condition_progress_active_) {
+      return;
+    }
+
+    ++optimality_condition_iteration_count_;
+    int total = std::max(1, optimality_condition_total_iterations_);
+    int current = std::min(optimality_condition_iteration_count_, total);
+    int left = std::max(0, total - current);
+
+    constexpr int kBarWidth = 30;
+    double ratio = static_cast<double>(current) / static_cast<double>(total);
+    int filled = static_cast<int>(ratio * kBarWidth);
+
+    std::string bar;
+    bar.reserve(kBarWidth);
+    for (int i = 0; i < kBarWidth; ++i) {
+      if (i < filled) {
+        bar.push_back('=');
+      } else if (i == filled && filled < kBarWidth) {
+        bar.push_back('>');
+      } else {
+        bar.push_back(' ');
+      }
+    }
+
+    auto now = std::chrono::steady_clock::now();
+    double elapsed = std::chrono::duration<double>(now - optimality_condition_start_time_).count();
+    double it_per_sec = elapsed > 0.0 ? static_cast<double>(current) / elapsed : 0.0;
+
+    std::ostringstream progress_line;
+    progress_line << '\r'
+                  << std::setw(3) << static_cast<int>(ratio * 100.0) << "%|"
+                  << bar << "| "
+                  << current << "/" << total
+                  << " left:" << left
+                  << " [" << std::fixed << std::setprecision(2) << it_per_sec << "it/s] "
+                  << std::defaultfloat
+                  << "objective_function=" << objective_function
+                  << " total_travel_time=" << total_travel_time
+                  << " budget_function=" << budget_function;
+    std::cout << progress_line.str() << std::flush;
+  }
+
+  void EnforceBudgetFeasibility(std::vector<double>& x,
+                                const std::vector<double>& lower_bounds) {
+    const int n = static_cast<int>(x.size());
+    double budget = BudgetFunction(n, x.data());
+    if (budget <= budget_upper_bound_) {
+      return;
+    }
+
+    const double multiplier = static_cast<double>(budget_function_multiplier_);
+    if (multiplier <= 0.0) {
+      return;
+    }
+
+    double excess = (budget - budget_upper_bound_) / multiplier;
+    if (excess <= 0.0) {
+      return;
+    }
+
+    double total_slack = 0.0;
+    for (int i = 0; i < n; ++i) {
+      total_slack += std::max(0.0, x[i] - lower_bounds[i]);
+    }
+    if (total_slack <= 0.0) {
+      return;
+    }
+
+    const double keep_ratio = std::max(0.0, (total_slack - excess) / total_slack);
+    for (int i = 0; i < n; ++i) {
+      const double slack = std::max(0.0, x[i] - lower_bounds[i]);
+      x[i] = lower_bounds[i] + slack * keep_ratio;
+    }
+
+    budget = BudgetFunction(n, x.data());
+    if (budget <= budget_upper_bound_) {
+      return;
+    }
+
+    // Final numeric cleanup: trim residual violation directly on slack variables.
+    excess = (budget - budget_upper_bound_) / multiplier;
+    for (int i = 0; i < n && excess > 0.0; ++i) {
+      const double reducible = std::max(0.0, x[i] - lower_bounds[i]);
+      const double reduce_by = std::min(reducible, excess);
+      x[i] -= reduce_by;
+      excess -= reduce_by;
+    }
+  }
 
 
   private:
@@ -244,7 +412,7 @@ private:
     double total_travel_time = network_.TotalTravelTime();
     double budget_function = BudgetFunction(n, x);
     double objective_function = total_travel_time + budget_function;
-    std::cout << "objective_function = " << objective_function << " total_travel_time = " << total_travel_time << " budget_function = " << budget_function << "\n";
+    PrintStandardOptimizationProgress(objective_function, total_travel_time, budget_function);
     return objective_function;
 }
 
@@ -345,20 +513,24 @@ private:
     return target;
   }
   
-  T OptimalityFunction(int od_pair_index, int link_index, bool flow_computatation = true) {
+  T OptimalityFunction(int link_index, bool flow_computatation = true) {
     if (flow_computatation) {
       approach_->Reset();
       approach_->ComputeTrafficFlows();
     }
-    const int routes_count = network_.mutable_od_pairs()[od_pair_index].GetRoutesCount();
-    auto routes = network_.mutable_od_pairs()[od_pair_index].GetRoutes();
-    auto e_column = MatrixHightPrecision::Constant(routes_count, 1, 1.0);
-    
-    auto jacobi = ConvertEigenMatrix(RoutesJacobiMatrix(routes, network_.mutable_links()));
-    auto capacity_der_column = ConvertEigenMatrix(CapacityDerColumn(routes, link_index));
-
-    return static_cast<T>(- (e_column.transpose() * jacobi.inverse() * capacity_der_column)(0, 0) / 
-                                          (e_column.transpose() * jacobi.inverse() * e_column)(0, 0));
+    T result = 0;
+    for (int od_pair_index = 0; od_pair_index < network_.number_of_od_pairs(); od_pair_index++) {
+      const int routes_count = network_.mutable_od_pairs()[od_pair_index].GetRoutesCount();
+      auto routes = network_.mutable_od_pairs()[od_pair_index].GetRoutes();
+      auto e_column = MatrixHightPrecision::Constant(routes_count, 1, 1.0);
+      auto jacobi = ConvertEigenMatrix(RoutesJacobiMatrix(routes, network_.mutable_links()));
+      auto capacity_der_column = ConvertEigenMatrix(CapacityDerColumn(routes, link_index));
+      result += network_.od_pairs()[od_pair_index].GetDemand() * 
+                                            static_cast<T>(- (e_column.transpose() * jacobi.inverse() * capacity_der_column)(0, 0) / 
+                                            (e_column.transpose() * jacobi.inverse() * e_column)(0, 0));
+    }
+    result /= budget_function_multiplier_;
+    return result;
   }
 
   std::vector <int> MiddleBoundTypeIndeces() {
@@ -375,10 +547,10 @@ private:
     return middle_bound_type_indeces;
   }
 
-  bool TransferResult(T amount, int od_pair_index, int max_optimality_index, int min_optimality_index) {
+  bool TransferResult(T amount, int max_optimality_index, int min_optimality_index) {
     network_.mutable_links()[max_optimality_index].capacity += amount;
     network_.mutable_links()[min_optimality_index].capacity -= amount;
-    bool result = OptimalityFunction(od_pair_index, max_optimality_index) > OptimalityFunction(od_pair_index, min_optimality_index);
+    bool result = OptimalityFunction(max_optimality_index) > OptimalityFunction(min_optimality_index);
     network_.mutable_links()[max_optimality_index].capacity -= amount;
     network_.mutable_links()[min_optimality_index].capacity += amount;
     return result;
@@ -392,7 +564,7 @@ private:
     return amount;
   }
 
-  T OptimalityConditionTransferAmount(int od_pair_index, int max_optimality_index, int min_optimality_index) {
+  T OptimalityConditionTransferAmount(int max_optimality_index, int min_optimality_index) {
     // auto max_optimality_capacity = network_.mutable_links()[max_index].capacity;
     // auto min_optimality_capacity = network_.mutable_links()[min_index].capacity;
 
@@ -400,52 +572,117 @@ private:
     amount = RespectedAmountConstranints(amount, max_optimality_index, min_optimality_index);
     T next_amount = RespectedAmountConstranints(amount * 2, max_optimality_index, min_optimality_index);
 
-    while (TransferResult(next_amount, od_pair_index, max_optimality_index, min_optimality_index)) {
+    while (TransferResult(next_amount, max_optimality_index, min_optimality_index)) {
       amount = next_amount;
       next_amount = RespectedAmountConstranints(amount * 2, max_optimality_index, min_optimality_index);
       if (std::abs(next_amount - amount) < link_capacity_selection_threshold_ / 10) {
         break;
       }
     }
-    while (!TransferResult(amount, od_pair_index, max_optimality_index, min_optimality_index)) {
+    while (!TransferResult(amount, max_optimality_index, min_optimality_index)) {
       amount /= 2;
     }
     return amount;
   }
 
-  void OptimalityConditionOptimization(int od_pair_index = 0) {
-    for (int cnt = 0; cnt < max_optimality_condition_iterations_; cnt++) {
-      std::cout << "iteration = " << cnt << '\n';
-      double total_travel_time = network_.TotalTravelTime();
-      std::cout << " total_travel_time = " << total_travel_time << "\n";
-      if (Budget() < budget_upper_bound_ - budget_threshold_) {
-        std::cout << "Non Upper Bound Iteration\n";
-        NonUpperBoundBudgetOptimalityIteration(od_pair_index);
-      }
-      else {
-        std::cout << "Upper Bound Iteration\n";
-        UpperBoundBudgetOptimalityIteration(od_pair_index);
-      }
+  void StandardOptimization() {
+    if (max_standard_iterations_ == 0) {
+      return;
     }
+    initial_guess_.resize(constraints_.size());
+    for (std::size_t i = 0; i < constraints_.size(); ++i) {
+      initial_guess_[i] = constraints_[i].lower_bound;
+      network_.mutable_links()[i].capacity = initial_guess_[i];
+    }
+    std::vector<double> x(initial_guess_.begin(), initial_guess_.end());
+    int n_vars = static_cast<int>(constraints_.size());
+    nlopt::opt optimizer(optimization_algorithm_, n_vars);
+
+    optimizer.set_min_objective(&BilevelCND<T>::NLOptObjectiveFunctionWrapper, this);
+
+    std::vector<double> lower_bounds(n_vars);
+    std::vector<double> upper_bounds(n_vars);
+
+    for (int i = 0; i < n_vars; ++i) {
+      lower_bounds[i] = constraints_[i].lower_bound;
+      upper_bounds[i] = constraints_[i].upper_bound; 
+    }
+
+    optimizer.set_maxeval(max_standard_iterations_);
+
+    optimizer.set_lower_bounds(lower_bounds);
+    optimizer.set_upper_bounds(upper_bounds);
+
+    double constraint_tol = 1e-4;
+    
+    optimizer.add_inequality_constraint(
+      &BilevelCND<T>::BudgetConstraintWrapper,
+      this,
+      constraint_tol
+    );
+
+    double minf;
+    
+    StartStandardOptimizationProgress();
+    try {
+      optimizer.optimize(x, minf);
+    } catch (...) {
+      FinishStandardOptimizationProgress();
+      throw;
+    }
+    FinishStandardOptimizationProgress();
+
+    EnforceBudgetFeasibility(x, lower_bounds);
+
+    for (unsigned i = 0; i < network_.number_of_links(); i++) {
+      network_.mutable_links()[i].capacity = x[i];
+    }
+  }
+
+  void OptimalityConditionOptimization() {
+    if (max_optimality_condition_iterations_ == 0) {
+      return;
+    }
+
+    StartOptimalityConditionProgress();
+    try {
+      for (int cnt = 0; cnt < max_optimality_condition_iterations_; cnt++) {
+        (void)cnt;
+        if (Budget() < budget_upper_bound_ - budget_threshold_) {
+          NonUpperBoundBudgetOptimalityIteration();
+        }
+        else {
+          UpperBoundBudgetOptimalityIteration();
+        }
+
+        approach_->Reset();
+        approach_->ComputeTrafficFlows();
+        double total_travel_time = network_.TotalTravelTime();
+        double budget_function = static_cast<double>(Budget());
+        double objective_function = total_travel_time + budget_function;
+        PrintOptimalityConditionProgress(
+          objective_function, total_travel_time, budget_function);
+      }
+    } catch (...) {
+      FinishOptimalityConditionProgress();
+      throw;
+    }
+    FinishOptimalityConditionProgress();
   }
 
   std::vector <T> OptimalityCondition() {
-    int od_pair_index = 0;
-    while (network_.mutable_od_pairs()[od_pair_index].GetDemand() == 0) {
-      od_pair_index++;
-    }
-    std::cout << std::fixed << std::setprecision(20);
+    //std::cout << std::fixed << std::setprecision(20);
     std::vector <T> link_condition_result(network_.number_of_links());
     for (int link_index = 0; link_index < network_.number_of_links(); link_index++) {
-      link_condition_result[link_index] = OptimalityFunction(od_pair_index, link_index);
-      std::cout << link_condition_result[link_index] << ' ';
+      link_condition_result[link_index] = OptimalityFunction(link_index);
+      //std::cout << link_condition_result[link_index] << ' ';
     } 
 
-    std::cout << std::fixed << std::setprecision(10);
+    //std::cout << std::fixed << std::setprecision(10);
     return link_condition_result;
   }
 
-  void UpperBoundBudgetOptimalityIteration(int od_pair_index) {
+  void UpperBoundBudgetOptimalityIteration() {
     int max_index = -1, min_index = -1;
     
     for (int link_index = 0; link_index < network_.number_of_links(); link_index++) {
@@ -467,7 +704,7 @@ private:
     approach_->Reset();
     approach_->ComputeTrafficFlows();
 
-    T max_value = OptimalityFunction(od_pair_index, max_index, false);
+    T max_value = OptimalityFunction(max_index, false);
     T min_value = max_value; 
 
     for (int link_index = 0; link_index < network_.number_of_links(); link_index++) {
@@ -475,7 +712,7 @@ private:
         continue;
       }
       auto cur_capacity = network_.mutable_links()[link_index].capacity;
-      auto cur_value = OptimalityFunction(od_pair_index, link_index, false);
+      auto cur_value = OptimalityFunction(link_index, false);
       if (cur_value > max_value &&
           std::abs(constraints_[link_index].upper_bound - cur_capacity) > link_capacity_selection_threshold_) {
         max_index = link_index;
@@ -488,19 +725,21 @@ private:
       }
     }
 
-    T amount = OptimalityConditionTransferAmount(od_pair_index, max_index, min_index);
-    std::cout << "max_index " << max_index << ' ' << "min_index " << min_index << " amount " << amount << '\n';
+    T amount = OptimalityConditionTransferAmount(max_index, min_index);
+    if (!optimality_condition_progress_active_) {
+      std::cout << "max_index " << max_index << ' ' << "min_index " << min_index << " amount " << amount << '\n';
+    }
 
     network_.mutable_links()[max_index].capacity += amount;
     network_.mutable_links()[min_index].capacity -= amount;
   }
 
-  bool ProcessingCheck(int link_index, int od_pair_index, T middle_bound_value) {
+  bool ProcessingCheck(int link_index, T middle_bound_value) {
     if (network_.mutable_links()[link_index].flow < 1e-3) {
       return false;
     }
     auto cur_capacity = network_.mutable_links()[link_index].capacity;
-    auto cur_value = OptimalityFunction(od_pair_index, link_index, false);
+    auto cur_value = OptimalityFunction(link_index, false);
     if (std::abs(constraints_[link_index].lower_bound - cur_capacity) < link_capacity_selection_threshold_ &&
         cur_value <= middle_bound_value) {
       return false;
@@ -531,34 +770,34 @@ private:
     return amount;
   }
 
-  bool NonUpperBoundTransferResult(T amount, int od_pair_index, int max_optimality_index, T middle_bound_value) {
+  bool NonUpperBoundTransferResult(T amount, int max_optimality_index, T middle_bound_value) {
     network_.mutable_links()[max_optimality_index].capacity += amount;
     bool result = false;
     if (amount < 0) {
-      result = OptimalityFunction(od_pair_index, max_optimality_index) < middle_bound_value;
+      result = OptimalityFunction(max_optimality_index) < middle_bound_value;
     }
     else {
-      result = OptimalityFunction(od_pair_index, max_optimality_index) > middle_bound_value;
+      result = OptimalityFunction(max_optimality_index) > middle_bound_value;
     }
     network_.mutable_links()[max_optimality_index].capacity -= amount;
     return result;
   }
 
-  T NonUpperBoundOptimalityConditionTransferAmount(int max_optimality_index, int od_pair_index, T middle_bound_value) {
+  T NonUpperBoundOptimalityConditionTransferAmount(int max_optimality_index, T middle_bound_value) {
     T amount = 1;
     T next_amount = 0;
     auto max_optimality_capacity = network_.mutable_links()[max_optimality_index].capacity;
     amount = NonUpperBoundRespectedAmountConstranints(amount, max_optimality_index);
-    auto cur_value = OptimalityFunction(od_pair_index, max_optimality_index, false);
+    auto cur_value = OptimalityFunction(max_optimality_index, false);
     if (cur_value < middle_bound_value) {
       next_amount = constraints_[max_optimality_index].lower_bound - max_optimality_capacity;
-      if (NonUpperBoundTransferResult(next_amount, od_pair_index, max_optimality_index, middle_bound_value)) {
+      if (NonUpperBoundTransferResult(next_amount, max_optimality_index, middle_bound_value)) {
         return next_amount;
       }
       amount = -1;
       amount = NonUpperBoundRespectedAmountConstranints(amount, max_optimality_index);
       next_amount = NonUpperBoundRespectedAmountConstranints(amount * -2, max_optimality_index);
-      while (NonUpperBoundTransferResult(next_amount, od_pair_index, max_optimality_index, middle_bound_value)) {
+      while (NonUpperBoundTransferResult(next_amount, max_optimality_index, middle_bound_value)) {
         amount = next_amount;
         next_amount = NonUpperBoundRespectedAmountConstranints(amount * -2, max_optimality_index);
         if (std::abs(next_amount - amount) < link_capacity_selection_threshold_ / 10) {
@@ -568,7 +807,7 @@ private:
     }
     else {
       next_amount = NonUpperBoundRespectedAmountConstranints(constraints_[max_optimality_index].upper_bound - max_optimality_capacity, max_optimality_index);
-      while (!NonUpperBoundTransferResult(next_amount, od_pair_index, max_optimality_index, middle_bound_value)) {
+      while (!NonUpperBoundTransferResult(next_amount, max_optimality_index, middle_bound_value)) {
         next_amount /= 2;
       }
       amount = next_amount;
@@ -576,15 +815,15 @@ private:
     return amount;
   }
 
-  void NonUpperBoundBudgetOptimalityIteration(int od_pair_index) {
-    T middle_bound_value = 1.0 / network_.mutable_od_pairs()[od_pair_index].GetDemand() * 5;
+  void NonUpperBoundBudgetOptimalityIteration() {
+    T middle_bound_value = 1.0;
     int max_optimality_index = -1;
     
     approach_->Reset();
     approach_->ComputeTrafficFlows();
 
     for (int link_index = 0; link_index < network_.number_of_links(); link_index++) {
-      if (ProcessingCheck(link_index, od_pair_index, middle_bound_value)) {
+      if (ProcessingCheck(link_index, middle_bound_value)) {
         max_optimality_index = link_index;
         break;
       }
@@ -594,20 +833,24 @@ private:
       return;
     }
 
-    T max_delta = std::abs(middle_bound_value - OptimalityFunction(od_pair_index, max_optimality_index, false));
+    T max_delta = std::abs(middle_bound_value - OptimalityFunction(max_optimality_index, false));
     for (int link_index = 0; link_index < network_.number_of_links(); link_index++) {
-      if (ProcessingCheck(link_index, od_pair_index, middle_bound_value)) {
-        auto cur_delta = std::abs(middle_bound_value - OptimalityFunction(od_pair_index, link_index, false));
+      if (ProcessingCheck(link_index, middle_bound_value)) {
+        auto cur_delta = std::abs(middle_bound_value - OptimalityFunction(link_index, false));
         if (cur_delta > max_delta) {
           max_optimality_index = link_index;
           max_delta = cur_delta;
         }
       }
     }
-    std::cout << "max_optimality_index = " << max_optimality_index << '\n';
-    std::cout << "max_delta " << max_delta << '\n';
-    auto amount = NonUpperBoundOptimalityConditionTransferAmount(max_optimality_index, od_pair_index, middle_bound_value);
-    std::cout << "amount " << amount << '\n';
+    if (!optimality_condition_progress_active_) {
+      std::cout << "max_optimality_index = " << max_optimality_index << '\n';
+      std::cout << "max_delta " << max_delta << '\n';
+    }
+    auto amount = NonUpperBoundOptimalityConditionTransferAmount(max_optimality_index, middle_bound_value);
+    if (!optimality_condition_progress_active_) {
+      std::cout << "amount " << amount << '\n';
+    }
     network_.mutable_links()[max_optimality_index].capacity += amount;
   }
 
