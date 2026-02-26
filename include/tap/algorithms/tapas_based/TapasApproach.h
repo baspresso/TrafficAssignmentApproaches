@@ -47,10 +47,14 @@ namespace TrafficAssignment {
 
     ~TapasApproach() = default;
 
-    void ComputeTrafficFlows() {
-      this->statistics_recorder_.StartRecording(this->GetApproachName());
+    void ComputeTrafficFlows(bool statistics_recording = false) override {
+      if (statistics_recording) {
+        this->statistics_recorder_.StartRecording(this->GetApproachName());
+      }
       AllOrNothingAssignment();
-      this->statistics_recorder_.RecordStatistics();
+      if (statistics_recording) {
+        this->statistics_recorder_.RecordStatistics();
+      }
       T prev = 0, now = 0;
       for (int i = 0; i < 20; i++) {
         EquilibrationIteration(i + 1);

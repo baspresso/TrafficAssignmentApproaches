@@ -20,8 +20,10 @@ namespace TrafficAssignment {
     ~PumpOutDemandBasedApproach() {
     }
 
-    void ComputeTrafficFlows() override {
-      this->statistics_recorder_.StartRecording(this->GetApproachName());
+    void ComputeTrafficFlows(bool statistics_recording = false) override {
+      if (statistics_recording) {
+        this->statistics_recorder_.StartRecording(this->GetApproachName());
+      }
       int iteration_count = 0;
       while (iteration_count++ < number_of_iterations_) {
         //std::cout << iteration_count << '\n';

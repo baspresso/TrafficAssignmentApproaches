@@ -31,6 +31,77 @@ The repository includes the following classes of traffic assignment methods:
 - **Build System**  
   The project uses **CMake** for compilation and build configuration, supporting modern C++ development workflows.
 
+## Build and Run (PowerShell)
+
+The repository now includes `CMakePresets.json` with a fixed MinGW + vcpkg toolchain setup.
+
+If you already have an old/incompatible `build` cache, do a one-time cleanup:
+```powershell
+Remove-Item -Recurse -Force .\build
+```
+
+1. Configure (`Release` / `Debug`):
+```powershell
+cmake --preset mingw-vcpkg-release
+cmake --preset mingw-vcpkg-debug
+```
+
+2. Build:
+```powershell
+cmake --build --preset build-release
+cmake --build --preset build-debug
+```
+
+3. Run:
+```powershell
+.\build\mingw-vcpkg-release\main.exe
+.\build\mingw-vcpkg-debug\main.exe
+```
+
+## Layered Runtime Config (defaults -> config -> env -> CLI)
+
+`main.exe` now supports layered configuration:
+
+- Defaults in code
+- INI config file (`--config ...` or `CND_CONFIG`)
+- Environment variable overrides (`CND_*`)
+- CLI overrides (highest priority)
+
+Example config file:
+
+- [configs/cnd.siouxfalls.ini](/c:/Projects/TrafficAssignmentApproaches/configs/cnd.siouxfalls.ini)
+
+Run using config only:
+```powershell
+.\build\mingw-vcpkg-release\main.exe --config .\configs\cnd.siouxfalls.ini
+```
+
+Run with environment override:
+```powershell
+$env:CND_ROUTE_THREADS = "1"
+.\build\mingw-vcpkg-release\main.exe --config .\configs\cnd.siouxfalls.ini
+```
+
+Run with CLI override (wins over env + file):
+```powershell
+$env:CND_ROUTE_THREADS = "1"
+.\build\mingw-vcpkg-release\main.exe --config .\configs\cnd.siouxfalls.ini --route-threads 2 --max-standard-iters 150
+```
+
+Show all available options:
+```powershell
+.\build\mingw-vcpkg-release\main.exe --help
+```
+
+For regular work you usually only need one pair configure/build commands for the selected preset.
+
+`RelWithDebInfo` is also available:
+```powershell
+cmake --preset mingw-vcpkg-relwithdebinfo
+cmake --build --preset build-relwithdebinfo
+.\build\mingw-vcpkg-relwithdebinfo\main.exe
+```
+
 ## Benchmark Networks
 
 The following standardized test networks are used to evaluate algorithmic performance:

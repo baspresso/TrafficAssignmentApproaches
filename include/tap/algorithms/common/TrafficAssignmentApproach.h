@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_map>
 #include <map>
+#include <cstddef>
 #include "../../utils/DataProcessor.h"
 #include "../../utils/StatisticsRecorder.h"
 #include "../../core/Network.h"
@@ -24,6 +25,15 @@ namespace TrafficAssignment {
     virtual std::string GetApproachName() = 0;
 
     virtual void ComputeTrafficFlows(bool statistics_recording = false) = 0;
+
+    // Optional runtime tuning hook for approaches that support route-search parallelism.
+    virtual void SetRouteSearchThreadCount(std::size_t thread_count) {
+      (void)thread_count;
+    }
+
+    virtual std::size_t GetRouteSearchThreadCount() const {
+      return 1;
+    }
 
     void Reset() {
       network_.Reset();

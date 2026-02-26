@@ -1,0 +1,52 @@
+{
+  "version": 4,
+  "configurePresets": [
+    {
+      "name": "mingw-vcpkg-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "mingw-vcpkg-debug",
+      "inherits": "mingw-vcpkg-base",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "mingw-vcpkg-release",
+      "inherits": "mingw-vcpkg-base",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "mingw-vcpkg-relwithdebinfo",
+      "inherits": "mingw-vcpkg-base",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-debug",
+      "configurePreset": "mingw-vcpkg-debug"
+    },
+    {
+      "name": "build-release",
+      "configurePreset": "mingw-vcpkg-release"
+    },
+    {
+      "name": "build-relwithdebinfo",
+      "configurePreset": "mingw-vcpkg-relwithdebinfo"
+    }
+  ]
+}

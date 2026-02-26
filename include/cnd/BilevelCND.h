@@ -13,10 +13,16 @@
 #include <cmath>
 #include <chrono>
 #include <sstream>
+#include <algorithm>
+#include <cstddef>
+#include <limits>
+#include <fstream>
+#include <filesystem>
 #include "../tap/utils/DataProcessor.h"
 #include "../tap/algorithms/common/TrafficAssignmentApproach.h"
 #include "../tap/core/Network.h"
 #include "DirectedConstraintLoader.h"
+#include "CndStatisticsRecorder.h"
 #include <nlopt.hpp>
 #include <boost/multiprecision/cpp_dec_float.hpp>
 
@@ -48,7 +54,9 @@ public:
     T budget_threshold = 1e-1,
     T budget_function_multiplier = 5,
     double budget_upper_bound = 100000,
-    nlopt::algorithm optimization_algorithm = nlopt::LN_COBYLA
+    nlopt::algorithm optimization_algorithm = nlopt::LN_COBYLA,
+    const CndMetricsConfig& metrics_config = CndMetricsConfig(),
+    std::size_t route_search_thread_count = 1
   )
     : network_(network),
       approach_(approach),
@@ -61,6 +69,8 @@ public:
       budget_function_multiplier_(budget_function_multiplier),
       budget_upper_bound_(budget_upper_bound),
       optimization_algorithm_(optimization_algorithm),
+      hard_budget_constraint_enabled_(SupportsHardBudgetConstraint(optimization_algorithm)),
+      budget_violation_penalty_factor_(100.0),
       verbose_(true),
       objective_value_(std::numeric_limits<double>::max()),
       total_travel_time_(0.0),
@@ -70,18 +80,50 @@ public:
       standard_progress_active_(false),
       optimality_condition_iteration_count_(0),
       optimality_condition_total_iterations_(0),
-      optimality_condition_progress_active_(false) {}
+      optimality_condition_progress_active_(false),
+      statistics_recorder_(network),
+      metrics_config_(metrics_config),
+      route_search_thread_count_(NormalizeThreadCount(route_search_thread_count)),
+      standard_trace_step_(0),
+      optcond_trace_step_(0),
+      total_ta_run_count_(0),
+      ta_compute_time_sum_seconds_(0.0),
+      ta_compute_time_max_seconds_(0.0),
+      max_budget_violation_(0.0),
+      invalid_ta_state_count_(0),
+      ta_recovery_success_count_(0),
+      ta_recovery_failure_count_(0),
+      invalid_value_log_count_(0),
+      invalid_objective_penalty_(1e30) {}
 
   /**
    * @brief Destructor
    */
   ~BilevelCND() = default;
 
+  void SetMetricsConfig(const CndMetricsConfig& metrics_config) {
+    metrics_config_ = metrics_config;
+  }
+
+  const CndMetricsConfig& GetMetricsConfig() const {
+    return metrics_config_;
+  }
+
+  void SetRouteSearchThreadCount(std::size_t thread_count) {
+    route_search_thread_count_ = NormalizeThreadCount(thread_count);
+    ApplyApproachRuntimeOptions();
+  }
+
+  std::size_t GetRouteSearchThreadCount() const {
+    return route_search_thread_count_;
+  }
+
   /**
    * @brief Compute the optimal network design
    * @return std::pair with optimal capacities and minimum objective value
    */
   void ComputeNetworkDesign() {
+    ApplyApproachRuntimeOptions();
     if (verbose_) {
       std::cout << "\n" << std::string(70, '=') << std::endl;
       std::cout << "BILEVEL CONTINUOUS NETWORK DESIGN PROBLEM" << std::endl;
@@ -93,50 +135,114 @@ public:
       std::cout << "  Tolerance: " << optimization_tolerance_ << std::endl;
       std::cout << "  Max standard iterations: " << max_standard_iterations_ << std::endl;
       std::cout << "  Max optimality condition iterations: " << max_optimality_condition_iterations_ << std::endl;
+      std::cout << "  Route search threads: " << route_search_thread_count_ << std::endl;
+      std::cout << "  Budget constraint mode: "
+                << (hard_budget_constraint_enabled_ ? "hard_nonlinear_constraint" : "soft_penalty_fallback")
+                << std::endl;
     }
     const auto optimization_start_time = std::chrono::steady_clock::now();
-    initial_guess_.resize(constraints_.size());
-    for (std::size_t i = 0; i < constraints_.size(); ++i) {
-      initial_guess_[i] = constraints_[i].lower_bound;
-      network_.mutable_links()[i].capacity = initial_guess_[i];
+    StartStatisticsRecording();
+
+    try {
+      initial_guess_.resize(constraints_.size());
+      for (std::size_t i = 0; i < constraints_.size(); ++i) {
+        initial_guess_[i] = constraints_[i].lower_bound;
+        network_.mutable_links()[i].capacity = initial_guess_[i];
+      }
+
+      std::cout << "StandardOptimization-start\n";
+      StandardOptimization();
+      double standard_ta_compute_seconds = 0.0;
+      if (!ComputeTrafficFlowsSafely(standard_ta_compute_seconds, "post_standard")) {
+        throw std::runtime_error("TA computation failed after post_standard recovery.");
+      }
+      const double post_standard_total_travel_time = network_.TotalTravelTime();
+      const double post_standard_budget_function = static_cast<double>(Budget());
+      const double post_standard_objective =
+        post_standard_total_travel_time + post_standard_budget_function;
+      if (!IsFiniteNumber(post_standard_total_travel_time) ||
+          !IsFiniteNumber(post_standard_budget_function) ||
+          !IsFiniteNumber(post_standard_objective)) {
+        PrintInvalidStateWarning("post_standard", "objective_invalid");
+        throw std::runtime_error("post_standard objective contains non-finite values.");
+      }
+      UpdateRuntimeAndBudgetMetrics(standard_ta_compute_seconds, post_standard_budget_function);
+      LogQualityTimePoint("post_standard",
+                          0,
+                          post_standard_objective,
+                          post_standard_total_travel_time,
+                          post_standard_budget_function,
+                          standard_ta_compute_seconds,
+                          true);
+
+      std::cout << "OptimalityCondition-start\n";
+
+      OptimalityConditionOptimization();
+
+      //std::cout << "budget" << BudgetFunction(x.size(), x.data()) << '\n';
+
+      //OptimalityCondition();
+      double final_ta_compute_seconds = 0.0;
+      if (!ComputeTrafficFlowsSafely(final_ta_compute_seconds, "final")) {
+        throw std::runtime_error("TA computation failed on final recovery attempt.");
+      }
+
+      std::cout << Budget() << '\n';
+      const auto optimization_end_time = std::chrono::steady_clock::now();
+      const double optimization_elapsed_seconds =
+        std::chrono::duration<double>(optimization_end_time - optimization_start_time).count();
+      std::ostringstream timing_line;
+      const double total_travel_time = network_.TotalTravelTime();
+      const double budget_function = static_cast<double>(Budget());
+      const double objective_function = total_travel_time + budget_function;
+      if (!IsFiniteNumber(total_travel_time) ||
+          !IsFiniteNumber(budget_function) ||
+          !IsFiniteNumber(objective_function)) {
+        PrintInvalidStateWarning("final", "objective_invalid");
+        throw std::runtime_error("final objective contains non-finite values.");
+      }
+      UpdateRuntimeAndBudgetMetrics(final_ta_compute_seconds, budget_function);
+      LogQualityTimePoint("final",
+                          optcond_trace_step_,
+                          objective_function,
+                          total_travel_time,
+                          budget_function,
+                          final_ta_compute_seconds,
+                          true);
+      timing_line << "optimization_time = "
+                  << std::fixed << std::setprecision(2)
+                  << optimization_elapsed_seconds << "s " << std::setprecision(10)
+                  << "objective_function=" << objective_function
+                  << " total_travel_time=" << total_travel_time
+                  << " budget_function=" << budget_function << "\n";
+      std::cout << timing_line.str();
+
+      StopStatisticsRecording(
+        optimization_elapsed_seconds,
+        objective_function,
+        total_travel_time,
+        budget_function,
+        true
+      );
+
+      std::cout << "RecordStatistics-Start\n";
+
+      RecordStatistics();
+
+      std::cout << "RecordStatistics-End\n";
+    } catch (...) {
+      const double failed_elapsed_seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - optimization_start_time)
+          .count();
+      StopStatisticsRecording(
+        failed_elapsed_seconds,
+        std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::quiet_NaN(),
+        false
+      );
+      throw;
     }
-
-    std::cout << "StandardOptimization-start\n";
-    StandardOptimization();
-    approach_->Reset();
-    approach_->ComputeTrafficFlows();
-
-    std::cout << "OptimalityCondition-start\n";
-
-    OptimalityConditionOptimization();
-
-    //std::cout << "budget" << BudgetFunction(x.size(), x.data()) << '\n';
-
-    //OptimalityCondition();
-    approach_->Reset();
-    approach_->ComputeTrafficFlows();
-
-    std::cout << Budget() << '\n';
-    const auto optimization_end_time = std::chrono::steady_clock::now();
-    const double optimization_elapsed_seconds =
-      std::chrono::duration<double>(optimization_end_time - optimization_start_time).count();
-    std::ostringstream timing_line;
-    double total_travel_time = network_.TotalTravelTime();
-    double budget_function = static_cast<double>(Budget());
-    double objective_function = total_travel_time + budget_function;
-    timing_line << "optimization_time = "
-                << std::fixed << std::setprecision(2)
-                << optimization_elapsed_seconds << "s " << std::setprecision(10)
-                << "objective_function=" << objective_function
-                << " total_travel_time=" << total_travel_time
-                << " budget_function=" << budget_function << "\n";
-    std::cout << timing_line.str();
-
-    std::cout << "RecordStatistics-Start\n";
-
-    RecordStatistics();
-
-    std::cout << "RecordStatistics-End\n";
   }
 
 private:
@@ -152,6 +258,8 @@ private:
   T budget_threshold_;
   T budget_function_multiplier_;
   double budget_upper_bound_;
+  bool hard_budget_constraint_enabled_;
+  double budget_violation_penalty_factor_;
   bool verbose_;
   std::vector<T> initial_guess_;
 
@@ -167,6 +275,247 @@ private:
   int optimality_condition_total_iterations_;
   std::chrono::steady_clock::time_point optimality_condition_start_time_;
   bool optimality_condition_progress_active_;
+  CndStatisticsRecorder<T> statistics_recorder_;
+  CndMetricsConfig metrics_config_;
+  std::size_t route_search_thread_count_;
+  int standard_trace_step_;
+  int optcond_trace_step_;
+  int total_ta_run_count_;
+  double ta_compute_time_sum_seconds_;
+  double ta_compute_time_max_seconds_;
+  double max_budget_violation_;
+  int invalid_ta_state_count_;
+  int ta_recovery_success_count_;
+  int ta_recovery_failure_count_;
+  int invalid_value_log_count_;
+  double invalid_objective_penalty_;
+
+  void ResetRuntimeCounters() {
+    standard_trace_step_ = 0;
+    optcond_trace_step_ = 0;
+    total_ta_run_count_ = 0;
+    ta_compute_time_sum_seconds_ = 0.0;
+    ta_compute_time_max_seconds_ = 0.0;
+    max_budget_violation_ = 0.0;
+    invalid_ta_state_count_ = 0;
+    ta_recovery_success_count_ = 0;
+    ta_recovery_failure_count_ = 0;
+    invalid_value_log_count_ = 0;
+  }
+
+  static std::size_t NormalizeThreadCount(std::size_t thread_count) {
+    return thread_count;
+  }
+
+  static bool SupportsHardBudgetConstraint(nlopt::algorithm algorithm) {
+    switch (algorithm) {
+      case nlopt::LN_COBYLA:
+      case nlopt::GN_ISRES:
+      case nlopt::AUGLAG:
+      case nlopt::AUGLAG_EQ:
+      case nlopt::LD_MMA:
+      case nlopt::LD_SLSQP:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  void ApplyApproachRuntimeOptions() {
+    if (!approach_) {
+      return;
+    }
+    approach_->SetRouteSearchThreadCount(route_search_thread_count_);
+    route_search_thread_count_ = NormalizeThreadCount(approach_->GetRouteSearchThreadCount());
+  }
+
+  bool IsFiniteNumber(double value) const {
+    return std::isfinite(value);
+  }
+
+  bool IsFiniteScalar(T value) const {
+    return IsFiniteNumber(static_cast<double>(value));
+  }
+
+  T NaNValue() const {
+    return static_cast<T>(std::numeric_limits<double>::quiet_NaN());
+  }
+
+  bool HasInvalidLinkState() const {
+    constexpr double kNegativeFlowTolerance = -1e-8;
+    for (const auto& link : network_.links()) {
+      const double flow = static_cast<double>(link.flow);
+      const double capacity = static_cast<double>(link.capacity);
+      const double delay = static_cast<double>(link.Delay());
+      if (!IsFiniteNumber(flow) || !IsFiniteNumber(capacity) || !IsFiniteNumber(delay)) {
+        return true;
+      }
+      if (capacity < 0.0 || delay < 0.0) {
+        return true;
+      }
+      if (flow < kNegativeFlowTolerance) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool HasInvalidTrafficAssignmentState() {
+    if (HasInvalidLinkState()) {
+      return true;
+    }
+    const double total_travel_time = network_.TotalTravelTime();
+    if (!IsFiniteNumber(total_travel_time) || total_travel_time < 0.0) {
+      return true;
+    }
+    return false;
+  }
+
+  void PrintInvalidStateWarning(const std::string& context,
+                                const std::string& stage) {
+    if (!verbose_) {
+      return;
+    }
+    if (invalid_value_log_count_ >= 10) {
+      return;
+    }
+    ++invalid_value_log_count_;
+    std::cout << "\n[WARN] Invalid TA state detected"
+              << " context=" << context
+              << " stage=" << stage
+              << " (NaN/inf/negative values)."
+              << std::endl;
+  }
+
+  bool ComputeTrafficFlowsSafely(double& ta_compute_seconds,
+                                 const std::string& context,
+                                 bool force_reset_before_first_attempt = false) {
+    ta_compute_seconds = 0.0;
+
+    auto run_attempt = [&](bool use_reset) -> bool {
+      if (use_reset) {
+        approach_->Reset();
+      }
+      const auto ta_start_time = std::chrono::steady_clock::now();
+      approach_->ComputeTrafficFlows();
+      ta_compute_seconds +=
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - ta_start_time).count();
+      return !HasInvalidTrafficAssignmentState();
+    };
+
+    if (run_attempt(force_reset_before_first_attempt)) {
+      return true;
+    }
+
+    ++invalid_ta_state_count_;
+    PrintInvalidStateWarning(context, "first_attempt");
+
+    if (run_attempt(true)) {
+      ++ta_recovery_success_count_;
+      return true;
+    }
+
+    ++ta_recovery_failure_count_;
+    PrintInvalidStateWarning(context, "after_reset_retry");
+    return false;
+  }
+
+  void StartStatisticsRecording() {
+    ResetRuntimeCounters();
+    CndRunMetadata metadata;
+    metadata.dataset_name = network_.name();
+    metadata.approach_name = approach_ ? approach_->GetApproachName() : "UnknownApproach";
+    metadata.nlopt_algorithm_name = GetAlgorithmName(optimization_algorithm_);
+    metadata.route_search_thread_count = route_search_thread_count_;
+    metadata.max_standard_iterations = max_standard_iterations_;
+    metadata.max_optimality_condition_iterations = max_optimality_condition_iterations_;
+    metadata.optimization_tolerance = static_cast<double>(optimization_tolerance_);
+    metadata.budget_upper_bound = budget_upper_bound_;
+    metadata.budget_threshold = static_cast<double>(budget_threshold_);
+    metadata.budget_function_multiplier = static_cast<double>(budget_function_multiplier_);
+    metadata.link_capacity_selection_threshold = static_cast<double>(link_capacity_selection_threshold_);
+    metadata.design_variables = constraints_.size();
+    metadata.number_of_links = static_cast<std::size_t>(network_.number_of_links());
+    metadata.number_of_od_pairs = static_cast<std::size_t>(network_.number_of_od_pairs());
+    statistics_recorder_.StartRun(metrics_config_, metadata);
+  }
+
+  void UpdateRuntimeAndBudgetMetrics(double ta_compute_seconds, double budget) {
+    ++total_ta_run_count_;
+    ta_compute_time_sum_seconds_ += ta_compute_seconds;
+    ta_compute_time_max_seconds_ = std::max(ta_compute_time_max_seconds_, ta_compute_seconds);
+    max_budget_violation_ = std::max(
+      max_budget_violation_,
+      std::max(0.0, budget - budget_upper_bound_)
+    );
+  }
+
+  void LogQualityTimePoint(const std::string& phase,
+                           int step,
+                           double objective,
+                           double total_travel_time,
+                           double budget,
+                           double ta_compute_seconds,
+                           bool force_relative_gap = false) {
+    if (!statistics_recorder_.IsRecording()) {
+      return;
+    }
+
+    double relative_gap = std::numeric_limits<double>::quiet_NaN();
+    const bool values_finite =
+      IsFiniteNumber(objective) &&
+      IsFiniteNumber(total_travel_time) &&
+      IsFiniteNumber(budget);
+    if (values_finite && statistics_recorder_.ShouldSampleRelativeGap(step, force_relative_gap)) {
+      relative_gap = static_cast<double>(network_.RelativeGap());
+    }
+
+    statistics_recorder_.LogPoint(
+      phase,
+      step,
+      objective,
+      total_travel_time,
+      budget,
+      budget_upper_bound_,
+      static_cast<double>(budget_threshold_),
+      ta_compute_seconds,
+      relative_gap
+    );
+  }
+
+  void StopStatisticsRecording(double total_elapsed_seconds,
+                               double final_objective,
+                               double final_total_travel_time,
+                               double final_budget,
+                               bool success) {
+    if (!statistics_recorder_.IsRecording()) {
+      return;
+    }
+
+    CndRunSummary summary;
+    summary.status = success ? "success" : "failure";
+    summary.total_elapsed_seconds = total_elapsed_seconds;
+    summary.standard_eval_count = standard_trace_step_;
+    summary.optimality_condition_iteration_count = optcond_trace_step_;
+    summary.total_ta_run_count = total_ta_run_count_;
+    summary.invalid_ta_state_count = invalid_ta_state_count_;
+    summary.ta_recovery_success_count = ta_recovery_success_count_;
+    summary.ta_recovery_failure_count = ta_recovery_failure_count_;
+    summary.avg_ta_compute_seconds =
+      total_ta_run_count_ > 0 ? ta_compute_time_sum_seconds_ / total_ta_run_count_ : 0.0;
+    summary.max_ta_compute_seconds = ta_compute_time_max_seconds_;
+    summary.final_objective = final_objective;
+    summary.final_total_travel_time = final_total_travel_time;
+    summary.final_budget = final_budget;
+    if (std::isfinite(final_budget)) {
+      summary.final_budget_violation = std::max(0.0, final_budget - budget_upper_bound_);
+    } else {
+      summary.final_budget_violation = std::numeric_limits<double>::quiet_NaN();
+    }
+    summary.best_feasible_objective = statistics_recorder_.best_feasible_objective();
+    summary.max_budget_violation = max_budget_violation_;
+    statistics_recorder_.StopRun(summary);
+  }
 
   void StartStandardOptimizationProgress() {
     standard_objective_eval_count_ = 0;
@@ -401,18 +750,60 @@ private:
     unsigned n,
     const double* x,
     double* grad) {
+    (void)grad;
     for (unsigned i = 0; i < n; i++) {
         network_.mutable_links()[i].capacity = x[i];
     }
 
-    approach_->Reset();
-
-    approach_->ComputeTrafficFlows();
+    double ta_compute_seconds = 0.0;
+    const bool ta_valid = ComputeTrafficFlowsSafely(ta_compute_seconds, "standard_eval");
 
     double total_travel_time = network_.TotalTravelTime();
     double budget_function = BudgetFunction(n, x);
-    double objective_function = total_travel_time + budget_function;
-    PrintStandardOptimizationProgress(objective_function, total_travel_time, budget_function);
+    const double budget_violation = std::max(0.0, budget_function - budget_upper_bound_);
+    double soft_budget_penalty = 0.0;
+    if (!hard_budget_constraint_enabled_ && budget_violation > 0.0) {
+      soft_budget_penalty = budget_violation_penalty_factor_ * budget_violation * budget_violation;
+      if (!IsFiniteNumber(soft_budget_penalty)) {
+        soft_budget_penalty = invalid_objective_penalty_;
+      }
+    }
+    double objective_function = total_travel_time + budget_function + soft_budget_penalty;
+    double log_total_travel_time = total_travel_time;
+    double log_budget_function = budget_function;
+    double log_objective_function = objective_function;
+    double progress_total_travel_time = total_travel_time;
+    double progress_budget_function = budget_function;
+    double progress_objective_function = objective_function;
+
+    bool objective_valid = ta_valid &&
+      IsFiniteNumber(total_travel_time) &&
+      IsFiniteNumber(budget_function) &&
+      IsFiniteNumber(objective_function);
+    if (!objective_valid) {
+      PrintInvalidStateWarning("standard_eval", "objective_invalid");
+      log_total_travel_time = std::numeric_limits<double>::quiet_NaN();
+      log_budget_function = std::numeric_limits<double>::quiet_NaN();
+      log_objective_function = std::numeric_limits<double>::quiet_NaN();
+      progress_total_travel_time = invalid_objective_penalty_;
+      progress_budget_function = IsFiniteNumber(budget_function) ? budget_function : 0.0;
+      progress_objective_function = invalid_objective_penalty_;
+      objective_function = invalid_objective_penalty_;
+    }
+
+    ++standard_trace_step_;
+    UpdateRuntimeAndBudgetMetrics(ta_compute_seconds, progress_budget_function);
+    LogQualityTimePoint("standard_eval",
+                        standard_trace_step_,
+                        log_objective_function,
+                        log_total_travel_time,
+                        log_budget_function,
+                        ta_compute_seconds);
+    PrintStandardOptimizationProgress(
+      progress_objective_function,
+      progress_total_travel_time,
+      progress_budget_function
+    );
     return objective_function;
 }
 
@@ -429,6 +820,8 @@ private:
         return "LN_COBYLA (Constrained Optimization BY Linear Approximations)";
       case nlopt::GN_ISRES:
         return "GN_ISRES (Improved Stochastic Ranking Evolution Strategy)";
+      case nlopt::GN_AGS:
+        return "GN_AGS (Adaptive Global Search)";
       default:
         return "Custom Algorithm (" + std::to_string(algo) + ")";
     }
@@ -515,21 +908,37 @@ private:
   
   T OptimalityFunction(int link_index, bool flow_computatation = true) {
     if (flow_computatation) {
-      approach_->Reset();
-      approach_->ComputeTrafficFlows();
+      double ta_compute_seconds = 0.0;
+      if (!ComputeTrafficFlowsSafely(ta_compute_seconds, "optimality_function")) {
+        return NaNValue();
+      }
     }
     T result = 0;
     for (int od_pair_index = 0; od_pair_index < network_.number_of_od_pairs(); od_pair_index++) {
       const int routes_count = network_.mutable_od_pairs()[od_pair_index].GetRoutesCount();
+      if (routes_count <= 0) {
+        continue;
+      }
       auto routes = network_.mutable_od_pairs()[od_pair_index].GetRoutes();
       auto e_column = MatrixHightPrecision::Constant(routes_count, 1, 1.0);
       auto jacobi = ConvertEigenMatrix(RoutesJacobiMatrix(routes, network_.mutable_links()));
       auto capacity_der_column = ConvertEigenMatrix(CapacityDerColumn(routes, link_index));
-      result += network_.od_pairs()[od_pair_index].GetDemand() * 
-                                            static_cast<T>(- (e_column.transpose() * jacobi.inverse() * capacity_der_column)(0, 0) / 
-                                            (e_column.transpose() * jacobi.inverse() * e_column)(0, 0));
+      auto jacobi_inverse = jacobi.inverse();
+      const auto numerator = (e_column.transpose() * jacobi_inverse * capacity_der_column)(0, 0);
+      const auto denominator = (e_column.transpose() * jacobi_inverse * e_column)(0, 0);
+      if (mp::abs(denominator) < static_cast<high_prec>(1e-40)) {
+        return NaNValue();
+      }
+      const T local_value = static_cast<T>(-numerator / denominator);
+      if (!IsFiniteScalar(local_value)) {
+        return NaNValue();
+      }
+      result += network_.od_pairs()[od_pair_index].GetDemand() * local_value;
     }
     result /= budget_function_multiplier_;
+    if (!IsFiniteScalar(result)) {
+      return NaNValue();
+    }
     return result;
   }
 
@@ -550,7 +959,9 @@ private:
   bool TransferResult(T amount, int max_optimality_index, int min_optimality_index) {
     network_.mutable_links()[max_optimality_index].capacity += amount;
     network_.mutable_links()[min_optimality_index].capacity -= amount;
-    bool result = OptimalityFunction(max_optimality_index) > OptimalityFunction(min_optimality_index);
+    const T max_value = OptimalityFunction(max_optimality_index);
+    const T min_value = OptimalityFunction(min_optimality_index);
+    bool result = IsFiniteScalar(max_value) && IsFiniteScalar(min_value) && max_value > min_value;
     network_.mutable_links()[max_optimality_index].capacity -= amount;
     network_.mutable_links()[min_optimality_index].capacity += amount;
     return result;
@@ -600,6 +1011,13 @@ private:
 
     optimizer.set_min_objective(&BilevelCND<T>::NLOptObjectiveFunctionWrapper, this);
 
+    if (optimization_algorithm_ == nlopt::AUGLAG || optimization_algorithm_ == nlopt::AUGLAG_EQ) {
+      nlopt::opt local_optimizer(nlopt::LN_COBYLA, n_vars);
+      local_optimizer.set_xtol_rel(static_cast<double>(optimization_tolerance_));
+      local_optimizer.set_maxeval(std::max(10, max_standard_iterations_ / 10));
+      optimizer.set_local_optimizer(local_optimizer);
+    }
+
     std::vector<double> lower_bounds(n_vars);
     std::vector<double> upper_bounds(n_vars);
 
@@ -615,11 +1033,16 @@ private:
 
     double constraint_tol = 1e-4;
     
-    optimizer.add_inequality_constraint(
-      &BilevelCND<T>::BudgetConstraintWrapper,
-      this,
-      constraint_tol
-    );
+    if (hard_budget_constraint_enabled_) {
+      optimizer.add_inequality_constraint(
+        &BilevelCND<T>::BudgetConstraintWrapper,
+        this,
+        constraint_tol
+      );
+    } else if (verbose_) {
+      std::cout << "  Selected algorithm does not support nonlinear constraints; "
+                   "using soft budget penalty fallback.\n";
+    }
 
     double minf;
     
@@ -655,13 +1078,43 @@ private:
           UpperBoundBudgetOptimalityIteration();
         }
 
-        approach_->Reset();
-        approach_->ComputeTrafficFlows();
+        double ta_compute_seconds = 0.0;
+        if (!ComputeTrafficFlowsSafely(ta_compute_seconds, "optcond_iter")) {
+          throw std::runtime_error("TA computation failed during optimality condition iteration.");
+        }
         double total_travel_time = network_.TotalTravelTime();
         double budget_function = static_cast<double>(Budget());
         double objective_function = total_travel_time + budget_function;
+        double log_total_travel_time = total_travel_time;
+        double log_budget_function = budget_function;
+        double log_objective_function = objective_function;
+        double progress_total_travel_time = total_travel_time;
+        double progress_budget_function = budget_function;
+        double progress_objective_function = objective_function;
+        if (!IsFiniteNumber(total_travel_time) ||
+            !IsFiniteNumber(budget_function) ||
+            !IsFiniteNumber(objective_function)) {
+          log_total_travel_time = std::numeric_limits<double>::quiet_NaN();
+          log_budget_function = std::numeric_limits<double>::quiet_NaN();
+          log_objective_function = std::numeric_limits<double>::quiet_NaN();
+          progress_total_travel_time = invalid_objective_penalty_;
+          progress_budget_function = IsFiniteNumber(budget_function) ? budget_function : 0.0;
+          progress_objective_function = invalid_objective_penalty_;
+          PrintInvalidStateWarning("optcond_iter", "objective_invalid");
+        }
+        optcond_trace_step_ = cnt + 1;
+        UpdateRuntimeAndBudgetMetrics(ta_compute_seconds, progress_budget_function);
+        LogQualityTimePoint("optcond_iter",
+                            optcond_trace_step_,
+                            log_objective_function,
+                            log_total_travel_time,
+                            log_budget_function,
+                            ta_compute_seconds);
         PrintOptimalityConditionProgress(
-          objective_function, total_travel_time, budget_function);
+          progress_objective_function,
+          progress_total_travel_time,
+          progress_budget_function
+        );
       }
     } catch (...) {
       FinishOptimalityConditionProgress();
@@ -701,10 +1154,15 @@ private:
       return;
     }
 
-    approach_->Reset();
-    approach_->ComputeTrafficFlows();
+    double ta_compute_seconds = 0.0;
+    if (!ComputeTrafficFlowsSafely(ta_compute_seconds, "upper_bound_opt_iteration")) {
+      return;
+    }
 
     T max_value = OptimalityFunction(max_index, false);
+    if (!IsFiniteScalar(max_value)) {
+      return;
+    }
     T min_value = max_value; 
 
     for (int link_index = 0; link_index < network_.number_of_links(); link_index++) {
@@ -713,6 +1171,9 @@ private:
       }
       auto cur_capacity = network_.mutable_links()[link_index].capacity;
       auto cur_value = OptimalityFunction(link_index, false);
+      if (!IsFiniteScalar(cur_value)) {
+        continue;
+      }
       if (cur_value > max_value &&
           std::abs(constraints_[link_index].upper_bound - cur_capacity) > link_capacity_selection_threshold_) {
         max_index = link_index;
@@ -740,6 +1201,9 @@ private:
     }
     auto cur_capacity = network_.mutable_links()[link_index].capacity;
     auto cur_value = OptimalityFunction(link_index, false);
+    if (!IsFiniteScalar(cur_value)) {
+      return false;
+    }
     if (std::abs(constraints_[link_index].lower_bound - cur_capacity) < link_capacity_selection_threshold_ &&
         cur_value <= middle_bound_value) {
       return false;
@@ -773,11 +1237,16 @@ private:
   bool NonUpperBoundTransferResult(T amount, int max_optimality_index, T middle_bound_value) {
     network_.mutable_links()[max_optimality_index].capacity += amount;
     bool result = false;
+    const T optimality_value = OptimalityFunction(max_optimality_index);
+    if (!IsFiniteScalar(optimality_value)) {
+      network_.mutable_links()[max_optimality_index].capacity -= amount;
+      return false;
+    }
     if (amount < 0) {
-      result = OptimalityFunction(max_optimality_index) < middle_bound_value;
+      result = optimality_value < middle_bound_value;
     }
     else {
-      result = OptimalityFunction(max_optimality_index) > middle_bound_value;
+      result = optimality_value > middle_bound_value;
     }
     network_.mutable_links()[max_optimality_index].capacity -= amount;
     return result;
@@ -789,6 +1258,9 @@ private:
     auto max_optimality_capacity = network_.mutable_links()[max_optimality_index].capacity;
     amount = NonUpperBoundRespectedAmountConstranints(amount, max_optimality_index);
     auto cur_value = OptimalityFunction(max_optimality_index, false);
+    if (!IsFiniteScalar(cur_value)) {
+      return 0;
+    }
     if (cur_value < middle_bound_value) {
       next_amount = constraints_[max_optimality_index].lower_bound - max_optimality_capacity;
       if (NonUpperBoundTransferResult(next_amount, max_optimality_index, middle_bound_value)) {
@@ -819,8 +1291,10 @@ private:
     T middle_bound_value = 1.0;
     int max_optimality_index = -1;
     
-    approach_->Reset();
-    approach_->ComputeTrafficFlows();
+    double ta_compute_seconds = 0.0;
+    if (!ComputeTrafficFlowsSafely(ta_compute_seconds, "non_upper_bound_opt_iteration")) {
+      return;
+    }
 
     for (int link_index = 0; link_index < network_.number_of_links(); link_index++) {
       if (ProcessingCheck(link_index, middle_bound_value)) {
@@ -833,10 +1307,18 @@ private:
       return;
     }
 
-    T max_delta = std::abs(middle_bound_value - OptimalityFunction(max_optimality_index, false));
+    const T base_value = OptimalityFunction(max_optimality_index, false);
+    if (!IsFiniteScalar(base_value)) {
+      return;
+    }
+    T max_delta = std::abs(middle_bound_value - base_value);
     for (int link_index = 0; link_index < network_.number_of_links(); link_index++) {
       if (ProcessingCheck(link_index, middle_bound_value)) {
-        auto cur_delta = std::abs(middle_bound_value - OptimalityFunction(link_index, false));
+        const T optimality_value = OptimalityFunction(link_index, false);
+        if (!IsFiniteScalar(optimality_value)) {
+          continue;
+        }
+        auto cur_delta = std::abs(middle_bound_value - optimality_value);
         if (cur_delta > max_delta) {
           max_optimality_index = link_index;
           max_delta = cur_delta;
