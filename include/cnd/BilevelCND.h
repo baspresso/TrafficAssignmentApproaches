@@ -21,7 +21,6 @@
 #include "OptimizationStep.h"
 #include "CndOptimizationContext.h"
 #include "OptimizationPipeline.h"
-#include <nlopt.hpp>
 #include <boost/multiprecision/cpp_dec_float.hpp>
 
 namespace TrafficAssignment {
@@ -33,9 +32,6 @@ class BilevelCND {
     boost::multiprecision::cpp_dec_float_50, Eigen::Dynamic, Eigen::Dynamic>;
 
 public:
-  /**
-   * @brief Pipeline-based constructor (new)
-   */
   BilevelCND(
     Network<T>& network,
     std::shared_ptr<TrafficAssignmentApproach<T>> approach,
@@ -62,66 +58,12 @@ public:
       route_search_thread_count_(route_search_thread_count)
   {
     ValidateConstraints(constraints, network);
-    if (budget_upper_bound <= 0) {
-      throw std::invalid_argument("budget_upper_bound must be positive");
-    }
-  }
-
-  /**
-   * @brief Legacy constructor (backwards-compatible)
-   *
-   * Synthesizes a 2-step pipeline from max_standard_iterations + max_optimality_condition_iterations
-   */
-  BilevelCND(
-    Network<T>& network,
-    std::shared_ptr<TrafficAssignmentApproach<T>> approach,
-    const std::vector<DirectedLinkCapacityConstraint>& constraints,
-    int max_standard_iterations = 1000,
-    int max_optimality_condition_iterations = 40,
-    T optimization_tolerance = 1e-4,
-    T link_capacity_selection_threshold = 1e-3,
-    T budget_threshold = 1e-1,
-    T budget_function_multiplier = 5,
-    double budget_upper_bound = 100000,
-    nlopt::algorithm optimization_algorithm = nlopt::LN_COBYLA,
-    const CndMetricsConfig& metrics_config = CndMetricsConfig(),
-    std::size_t route_search_thread_count = 1
-  )
-    : network_(network),
-      approach_(approach),
-      constraints_(constraints),
-      link_capacity_selection_threshold_(link_capacity_selection_threshold),
-      budget_threshold_(budget_threshold),
-      budget_function_multiplier_(budget_function_multiplier),
-      budget_upper_bound_(budget_upper_bound),
-      verbose_(true),
-      statistics_recorder_(network),
-      metrics_config_(metrics_config),
-      route_search_thread_count_(route_search_thread_count)
-  {
-    if (max_standard_iterations < 0) {
-      throw std::invalid_argument("max_standard_iterations must be non-negative");
-    }
-    if (max_optimality_condition_iterations < 0) {
-      throw std::invalid_argument("max_optimality_condition_iterations must be non-negative");
-    }
-    if (optimization_tolerance < 0) {
-      throw std::invalid_argument("optimization_tolerance must be non-negative");
+    if (step_configs.empty()) {
+      throw std::invalid_argument("step_configs must not be empty");
     }
     if (budget_upper_bound <= 0) {
       throw std::invalid_argument("budget_upper_bound must be positive");
     }
-    ValidateConstraints(constraints, network);
-
-    // Synthesize pipeline from legacy parameters
-    step_configs_ = SynthesizeLegacyPipeline(
-      max_standard_iterations,
-      max_optimality_condition_iterations,
-      static_cast<double>(optimization_tolerance),
-      CndOptimizationContext<T>::GetAlgorithmName(optimization_algorithm).substr(
-        0, CndOptimizationContext<T>::GetAlgorithmName(optimization_algorithm).find(' ')),
-      optimization_algorithm
-    );
   }
 
   ~BilevelCND() = default;
@@ -217,54 +159,6 @@ private:
       throw std::invalid_argument(
         "constraints size (" + std::to_string(constraints.size()) +
         ") must match number of links (" + std::to_string(network.number_of_links()) + ")");
-    }
-  }
-
-  static std::vector<OptimizationStepConfig> SynthesizeLegacyPipeline(
-      int max_standard_iterations,
-      int max_optimality_condition_iterations,
-      double optimization_tolerance,
-      const std::string& algorithm_short_name,
-      nlopt::algorithm algo) {
-    std::vector<OptimizationStepConfig> configs;
-
-    if (max_standard_iterations > 0) {
-      OptimizationStepConfig nlopt_step;
-      nlopt_step.type = "nlopt";
-      nlopt_step.algorithm = GetAlgorithmShortName(algo);
-      nlopt_step.max_iterations = max_standard_iterations;
-      nlopt_step.tolerance = optimization_tolerance;
-      configs.push_back(std::move(nlopt_step));
-    }
-
-    if (max_optimality_condition_iterations > 0) {
-      OptimizationStepConfig optcond_step;
-      optcond_step.type = "optimality_condition";
-      optcond_step.max_iterations = max_optimality_condition_iterations;
-      configs.push_back(std::move(optcond_step));
-    }
-
-    return configs;
-  }
-
-  static std::string GetAlgorithmShortName(nlopt::algorithm algo) {
-    switch (algo) {
-      case nlopt::LN_COBYLA: return "LN_COBYLA";
-      case nlopt::LN_BOBYQA: return "LN_BOBYQA";
-      case nlopt::LN_NELDERMEAD: return "LN_NELDERMEAD";
-      case nlopt::LN_SBPLX: return "LN_SBPLX";
-      case nlopt::LN_PRAXIS: return "LN_PRAXIS";
-      case nlopt::LN_NEWUOA: return "LN_NEWUOA";
-      case nlopt::LN_NEWUOA_BOUND: return "LN_NEWUOA_BOUND";
-      case nlopt::GN_ISRES: return "GN_ISRES";
-      case nlopt::GN_AGS: return "GN_AGS";
-      case nlopt::GN_ESCH: return "GN_ESCH";
-      case nlopt::GN_CRS2_LM: return "GN_CRS2_LM";
-      case nlopt::AUGLAG: return "AUGLAG";
-      case nlopt::AUGLAG_EQ: return "AUGLAG_EQ";
-      case nlopt::LD_SLSQP: return "LD_SLSQP";
-      case nlopt::LD_MMA: return "LD_MMA";
-      default: return "LN_COBYLA";
     }
   }
 
@@ -382,6 +276,7 @@ private:
         total_optcond += sc.max_iterations;
       }
     }
+    metadata.scenario_name = metrics_config_.scenario_name;
     metadata.route_search_thread_count = route_search_thread_count_;
     metadata.max_standard_iterations = total_standard;
     metadata.max_optimality_condition_iterations = total_optcond;

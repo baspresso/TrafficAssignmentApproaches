@@ -16,6 +16,9 @@ struct OptimizationStepConfig {
   std::string local_algorithm;
   int local_max_iterations = 0;
   double local_tolerance = 0.0;
+
+  // Population-based (OptimLib) specific
+  int population_size = 0;  // 0 = auto (max(200, 2*n_vars))
 };
 
 struct StepResult {

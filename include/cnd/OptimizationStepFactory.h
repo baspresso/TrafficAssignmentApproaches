@@ -8,6 +8,7 @@
 #include "OptimizationStep.h"
 #include "steps/NloptOptimizationStep.h"
 #include "steps/OptimalityConditionStep.h"
+#include "steps/OptimlibOptimizationStep.h"
 
 namespace TrafficAssignment {
 
@@ -24,6 +25,9 @@ public:
     }
     if (type == "optimality_condition") {
       return std::make_unique<OptimalityConditionStep<T>>(config);
+    }
+    if (type == "optimlib") {
+      return std::make_unique<OptimlibOptimizationStep<T>>(config);
     }
     throw std::runtime_error("Unknown optimization step type: '" + config.type + "'");
   }

@@ -26,12 +26,14 @@ struct CndMetricsConfig {
   bool write_summary_csv = true;
   std::string output_root = "performance_results";
   std::string run_id;
+  std::string scenario_name;
 };
 
 struct CndRunMetadata {
   std::string dataset_name;
   std::string approach_name;
   std::string nlopt_algorithm_name;
+  std::string scenario_name;
   std::size_t route_search_thread_count = 1;
   int max_standard_iterations = 0;
   int max_optimality_condition_iterations = 0;
@@ -275,7 +277,7 @@ private:
 
   void InitializeTraceFile() const {
     std::ofstream file(trace_file_path_, std::ios::out);
-    file << "RunId,Dataset,Approach,Algorithm,ElapsedTime(s),Phase,Step,Objective,"
+    file << "RunId,Scenario,Dataset,Approach,Algorithm,ElapsedTime(s),Phase,Step,Objective,"
             "BestFeasibleObjective,TotalTravelTime,Budget,BudgetViolation,RelativeGap,"
             "TAComputeTime(s)\n";
   }
@@ -291,6 +293,7 @@ private:
     for (std::size_t i = flushed_points_; i < trace_points_.size(); ++i) {
       const auto& point = trace_points_[i];
       file << run_id_ << ","
+           << metadata_.scenario_name << ","
            << metadata_.dataset_name << ","
            << approach_name << ","
            << metadata_.nlopt_algorithm_name << ","
@@ -315,6 +318,7 @@ private:
     file << "{\n";
     file << "  \"run_id\": \"" << run_id_ << "\",\n";
     file << "  \"timestamp\": \"" << CurrentTimestampIso8601() << "\",\n";
+    file << "  \"scenario\": \"" << metadata_.scenario_name << "\",\n";
     file << "  \"dataset\": \"" << metadata_.dataset_name << "\",\n";
     file << "  \"approach\": \"" << approach_name << "\",\n";
     file << "  \"algorithm\": \"" << metadata_.nlopt_algorithm_name << "\",\n";
@@ -349,7 +353,7 @@ private:
     const bool file_exists = std::filesystem::exists(summary_file_path_);
     std::ofstream file(summary_file_path_, std::ios::app);
     if (!file_exists) {
-      file << "RunId,Timestamp,Status,Dataset,Approach,Algorithm,DesignVariables,Links,ODPairs,"
+      file << "RunId,Timestamp,Scenario,Status,Dataset,Approach,Algorithm,DesignVariables,Links,ODPairs,"
               "MaxStandardIterations,MaxOptimalityIterations,StandardEvalCount,"
               "OptimalityConditionIterationCount,TotalTARunCount,InvalidTAStateCount,"
               "TARecoverySuccessCount,TARecoveryFailureCount,TotalElapsedTime(s),"
@@ -362,6 +366,7 @@ private:
     file << std::setprecision(10)
          << run_id_ << ","
          << CurrentTimestampIso8601() << ","
+         << metadata_.scenario_name << ","
          << summary.status << ","
          << metadata_.dataset_name << ","
          << approach_name << ","

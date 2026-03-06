@@ -200,11 +200,34 @@ namespace TrafficAssignment {
 
   template <typename T>
   Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> RoutesJacobiMatrix(const std::vector<std::vector <int>>& routes, std::vector <Link<T>>& links) {
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> J(routes.size(), routes.size());
-      
-    for(size_t i = 0; i < routes.size(); ++i) {
-      for(size_t j = 0; j < routes.size(); ++j) {
-        J(i,j) = CalculateJacobiElement(routes[i], routes[j], links);
+    const size_t R = routes.size();
+    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> J(R, R);
+
+    // Pre-build link sets for all routes to avoid repeated construction
+    std::vector<std::unordered_set<int>> route_sets(R);
+    for (size_t i = 0; i < R; ++i) {
+      route_sets[i].insert(routes[i].begin(), routes[i].end());
+    }
+
+    // Exploit symmetry: J(i,j) = J(j,i) since both equal sum of DelayDer on shared links
+    for (size_t i = 0; i < R; ++i) {
+      // Diagonal
+      T sum = 0;
+      for (int link_id : routes[i]) {
+        sum += links[link_id].DelayDer();
+      }
+      J(i, i) = sum;
+
+      // Off-diagonal (upper triangle, mirror to lower)
+      for (size_t j = i + 1; j < R; ++j) {
+        T val = 0;
+        for (int link_id : routes[j]) {
+          if (route_sets[i].count(link_id)) {
+            val += links[link_id].DelayDer();
+          }
+        }
+        J(i, j) = val;
+        J(j, i) = val;
       }
     }
     return J;

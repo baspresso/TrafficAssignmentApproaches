@@ -5,19 +5,18 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <optional>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
 
-#include <Eigen/Dense>
-#include <boost/multiprecision/cpp_dec_float.hpp>
-#include <nlopt.hpp>
-
 #include "../include/cnd/BilevelCND.h"
 #include "../include/cnd/DirectedConstraintLoader.h"
+#include "../include/cnd/OptimizationStep.h"
 #include "../include/tap/algorithms/demand_based/PumpOutDemandBasedApproach.h"
 #include "../include/tap/algorithms/route_based/RouteBasedApproach.h"
 #include "../include/tap/algorithms/tapas_based/TapasApproach.h"
@@ -40,18 +39,17 @@ struct RunConfig {
   std::string shift_method = "NewtonStep";
   std::size_t route_search_threads = 1;
 
-  int max_standard_iterations = 100;
-  int max_optimality_condition_iterations = 10;
-  long double optimization_tolerance = 1e-4L;
   long double link_capacity_selection_threshold = 1e-3L;
   long double budget_threshold = 1e-1L;
   long double budget_function_multiplier = 5.0L;
   double budget_upper_bound = 100000.0;
-  std::string nlopt_algorithm = "LN_COBYLA";
 
   bool loader_verbose = true;
   bool print_effective_config = true;
   TrafficAssignment::CndMetricsConfig metrics;
+
+  // Pipeline step configs parsed from [step.N] sections
+  std::map<int, TrafficAssignment::OptimizationStepConfig> step_sections;
 };
 
 std::string ToLowerCopy(std::string text) {
@@ -60,16 +58,6 @@ std::string ToLowerCopy(std::string text) {
     text.end(),
     text.begin(),
     [](unsigned char c) { return static_cast<char>(std::tolower(c)); }
-  );
-  return text;
-}
-
-std::string ToUpperCopy(std::string text) {
-  std::transform(
-    text.begin(),
-    text.end(),
-    text.begin(),
-    [](unsigned char c) { return static_cast<char>(std::toupper(c)); }
   );
   return text;
 }
@@ -151,20 +139,6 @@ void ApplyRunOption(RunConfig& config,
     config.route_search_threads = ParseNumber<std::size_t>(raw_value, key);
     return;
   }
-  if (key == "max_standard_iterations" || key == "max_standard_iters") {
-    config.max_standard_iterations = ParseNumber<int>(raw_value, key);
-    return;
-  }
-  if (key == "max_optimality_condition_iterations" ||
-      key == "max_optimality_iters" ||
-      key == "max_optcond_iters") {
-    config.max_optimality_condition_iterations = ParseNumber<int>(raw_value, key);
-    return;
-  }
-  if (key == "optimization_tolerance" || key == "tolerance") {
-    config.optimization_tolerance = ParseNumber<long double>(raw_value, key);
-    return;
-  }
   if (key == "link_capacity_selection_threshold" || key == "link_threshold") {
     config.link_capacity_selection_threshold = ParseNumber<long double>(raw_value, key);
     return;
@@ -179,10 +153,6 @@ void ApplyRunOption(RunConfig& config,
   }
   if (key == "budget_upper_bound") {
     config.budget_upper_bound = ParseNumber<double>(raw_value, key);
-    return;
-  }
-  if (key == "nlopt_algorithm" || key == "algorithm") {
-    config.nlopt_algorithm = raw_value;
     return;
   }
   if (key == "loader_verbose") {
@@ -233,8 +203,39 @@ void ApplyMetricsOption(RunConfig& config,
     config.metrics.run_id = raw_value;
     return;
   }
+  if (key == "scenario_name" || key == "scenario") {
+    config.metrics.scenario_name = raw_value;
+    return;
+  }
 
   throw std::runtime_error("Unknown metrics option: '" + raw_key + "'");
+}
+
+void ApplyStepOption(TrafficAssignment::OptimizationStepConfig& step,
+                     const std::string& raw_key,
+                     const std::string& raw_value) {
+  const std::string key = NormalizeKey(raw_key);
+  if (key == "type") {
+    step.type = raw_value;
+  } else if (key == "name") {
+    step.name = raw_value;
+  } else if (key == "max_iterations" || key == "max_iters") {
+    step.max_iterations = ParseNumber<int>(raw_value, key);
+  } else if (key == "tolerance") {
+    step.tolerance = ParseNumber<double>(raw_value, key);
+  } else if (key == "algorithm") {
+    step.algorithm = raw_value;
+  } else if (key == "local_algorithm") {
+    step.local_algorithm = raw_value;
+  } else if (key == "local_max_iterations" || key == "local_max_iters") {
+    step.local_max_iterations = ParseNumber<int>(raw_value, key);
+  } else if (key == "local_tolerance") {
+    step.local_tolerance = ParseNumber<double>(raw_value, key);
+  } else if (key == "population_size") {
+    step.population_size = ParseNumber<int>(raw_value, key);
+  } else {
+    throw std::runtime_error("Unknown step option: '" + raw_key + "'");
+  }
 }
 
 CliOptions ParseCliOptions(int argc, char** argv) {
@@ -317,7 +318,9 @@ void ApplyConfigFile(const fs::path& config_path, RunConfig& config) {
 
   std::string line;
   std::string current_section;
+  int current_step_index = -1;
   int line_number = 0;
+  const std::regex step_pattern(R"(step\.(\d+))");
   while (std::getline(file, line)) {
     ++line_number;
     const std::string trimmed = TrimCopy(line);
@@ -327,6 +330,14 @@ void ApplyConfigFile(const fs::path& config_path, RunConfig& config) {
 
     if (trimmed.front() == '[' && trimmed.back() == ']') {
       current_section = ToLowerCopy(TrimCopy(trimmed.substr(1, trimmed.size() - 2)));
+      current_step_index = -1;
+      std::smatch match;
+      if (std::regex_match(current_section, match, step_pattern)) {
+        current_step_index = std::stoi(match[1].str());
+        if (config.step_sections.find(current_step_index) == config.step_sections.end()) {
+          config.step_sections[current_step_index] = TrafficAssignment::OptimizationStepConfig();
+        }
+      }
       continue;
     }
 
@@ -344,6 +355,8 @@ void ApplyConfigFile(const fs::path& config_path, RunConfig& config) {
       ApplyRunOption(config, key, value);
     } else if (current_section == "metrics") {
       ApplyMetricsOption(config, key, value);
+    } else if (current_step_index >= 0) {
+      ApplyStepOption(config.step_sections[current_step_index], key, value);
     } else {
       throw std::runtime_error(
         "Unsupported config section '" + current_section + "' at line " +
@@ -371,14 +384,10 @@ void ApplyEnvironmentOverrides(RunConfig& config) {
   apply_run("CND_APPROACH_ALPHA", "approach_alpha");
   apply_run("CND_SHIFT_METHOD", "shift_method");
   apply_run("CND_ROUTE_THREADS", "route_search_threads");
-  apply_run("CND_MAX_STANDARD_ITERS", "max_standard_iterations");
-  apply_run("CND_MAX_OPTCOND_ITERS", "max_optimality_condition_iterations");
-  apply_run("CND_TOLERANCE", "optimization_tolerance");
   apply_run("CND_LINK_THRESHOLD", "link_capacity_selection_threshold");
   apply_run("CND_BUDGET_THRESHOLD", "budget_threshold");
   apply_run("CND_BUDGET_MULTIPLIER", "budget_function_multiplier");
   apply_run("CND_BUDGET_UPPER_BOUND", "budget_upper_bound");
-  apply_run("CND_NLOPT_ALGORITHM", "nlopt_algorithm");
   apply_run("CND_LOADER_VERBOSE", "loader_verbose");
   apply_run("CND_PRINT_CONFIG", "print_effective_config");
 
@@ -390,6 +399,7 @@ void ApplyEnvironmentOverrides(RunConfig& config) {
   apply_metrics("CND_METRICS_WRITE_SUMMARY", "write_summary_csv");
   apply_metrics("CND_METRICS_OUTPUT_ROOT", "output_root");
   apply_metrics("CND_METRICS_RUN_ID", "run_id");
+  apply_metrics("CND_METRICS_SCENARIO_NAME", "scenario_name");
 }
 
 void ApplyCliOverrides(const CliOptions& cli, RunConfig& config) {
@@ -403,28 +413,6 @@ void ApplyCliOverrides(const CliOptions& cli, RunConfig& config) {
     }
     ApplyRunOption(config, raw_key, value);
   }
-}
-
-nlopt::algorithm ParseNloptAlgorithm(const std::string& raw_value) {
-  const std::string value = ToUpperCopy(raw_value);
-  if (value == "LN_COBYLA") return nlopt::LN_COBYLA;
-  if (value == "LN_BOBYQA") return nlopt::LN_BOBYQA;
-  if (value == "LN_NELDERMEAD") return nlopt::LN_NELDERMEAD;
-  if (value == "LN_SBPLX") return nlopt::LN_SBPLX;
-  if (value == "LN_PRAXIS") return nlopt::LN_PRAXIS;
-  if (value == "LN_NEWUOA") return nlopt::LN_NEWUOA;
-  if (value == "LN_NEWUOA_BOUND") return nlopt::LN_NEWUOA_BOUND;
-  if (value == "GN_ISRES") return nlopt::GN_ISRES;
-  if (value == "GN_AGS") return nlopt::GN_AGS;
-  if (value == "GN_ESCH") return nlopt::GN_ESCH;
-  if (value == "GN_CRS2_LM") return nlopt::GN_CRS2_LM;
-  if (value == "AUGLAG") return nlopt::AUGLAG;
-  if (value == "AUGLAG_EQ") return nlopt::AUGLAG_EQ;
-  throw std::runtime_error(
-    "Unsupported nlopt algorithm '" + raw_value +
-    "'. Supported: LN_COBYLA, LN_BOBYQA, LN_NELDERMEAD, LN_SBPLX, LN_PRAXIS, "
-    "LN_NEWUOA, LN_NEWUOA_BOUND, GN_ISRES, GN_AGS, GN_ESCH, GN_CRS2_LM, AUGLAG, AUGLAG_EQ."
-  );
 }
 
 std::shared_ptr<TrafficAssignment::TrafficAssignmentApproach<long double>>
@@ -460,23 +448,38 @@ CreateApproach(const RunConfig& config, TrafficAssignment::Network<long double>&
 
 void PrintHelp() {
   std::cout
-    << "Usage: main.exe [options]\n\n"
+    << "Usage: main.exe --config <path> [options]\n\n"
     << "Layering: defaults -> config file -> environment -> CLI\n\n"
-    << "General options:\n"
-    << "  --config <path>                  INI config file path\n"
+    << "Optimization steps are defined via [step.N] sections in the INI config file.\n"
+    << "Example:\n"
+    << "  [step.0]\n"
+    << "  type = nlopt\n"
+    << "  algorithm = LN_COBYLA\n"
+    << "  max_iterations = 200\n"
+    << "  tolerance = 1e-4\n\n"
+    << "  [step.1]\n"
+    << "  type = optimality_condition\n"
+    << "  max_iterations = 30\n\n"
+    << "Step options:\n"
+    << "  type                             nlopt | optimality_condition | optimlib\n"
+    << "  algorithm                        NLopt: LN_COBYLA, GN_ISRES, ...\n"
+    << "                                   OptimLib: DE, PSO, NM, DE_PRMM, PSO_DV, GD\n"
+    << "  local_algorithm                  Local sub-algorithm for AUGLAG (NLopt)\n"
+    << "  max_iterations                   Max iterations/generations for this step\n"
+    << "  tolerance                        Convergence tolerance\n"
+    << "  population_size                  Population size for OptimLib (0=auto)\n"
+    << "  name                             Display name for this step\n\n"
+    << "General options (CLI or [run] section):\n"
+    << "  --config <path>                  INI config file path (required)\n"
     << "  --dataset <name>                 Dataset name (e.g. SiouxFalls)\n"
     << "  --constraints-file <path>        Constraints CSV path\n"
     << "  --approach <RouteBased|Tapas|DemandBased>\n"
     << "  --shift-method <name>            Shift method (RouteBased/Tapas)\n"
     << "  --route-threads <n>              Route search thread count\n"
-    << "  --max-standard-iters <n>\n"
-    << "  --max-optcond-iters <n>\n"
-    << "  --tolerance <value>\n"
     << "  --link-threshold <value>\n"
     << "  --budget-threshold <value>\n"
     << "  --budget-multiplier <value>\n"
     << "  --budget-upper-bound <value>\n"
-    << "  --nlopt-algorithm <LN_COBYLA|LN_BOBYQA|LN_NELDERMEAD|LN_SBPLX|LN_PRAXIS|LN_NEWUOA|LN_NEWUOA_BOUND|GN_ISRES|GN_AGS|GN_ESCH|GN_CRS2_LM|AUGLAG|AUGLAG_EQ>\n"
     << "  --loader-verbose <true|false>\n"
     << "  --print-config <true|false>\n\n"
     << "Metrics CLI overrides (prefix metrics_):\n"
@@ -487,17 +490,8 @@ void PrintHelp() {
     << "  --metrics_write_metadata_json <true|false>\n"
     << "  --metrics_write_summary_csv <true|false>\n"
     << "  --metrics_output_root <path>\n"
-    << "  --metrics_run_id <id>\n\n"
-    << "Environment variables (same precedence layer before CLI):\n"
-    << "  CND_CONFIG, CND_DATASET, CND_CONSTRAINTS_FILE, CND_APPROACH,\n"
-    << "  CND_SHIFT_METHOD, CND_ROUTE_THREADS, CND_MAX_STANDARD_ITERS,\n"
-    << "  CND_MAX_OPTCOND_ITERS, CND_TOLERANCE, CND_LINK_THRESHOLD,\n"
-    << "  CND_BUDGET_THRESHOLD, CND_BUDGET_MULTIPLIER, CND_BUDGET_UPPER_BOUND,\n"
-    << "  CND_NLOPT_ALGORITHM, CND_LOADER_VERBOSE, CND_PRINT_CONFIG,\n"
-    << "  CND_METRICS_ENABLE_TRACE, CND_METRICS_ENABLE_RELATIVE_GAP,\n"
-    << "  CND_METRICS_RELATIVE_GAP_PERIOD, CND_METRICS_FLUSH_EVERY,\n"
-    << "  CND_METRICS_WRITE_METADATA, CND_METRICS_WRITE_SUMMARY,\n"
-    << "  CND_METRICS_OUTPUT_ROOT, CND_METRICS_RUN_ID\n";
+    << "  --metrics_run_id <id>\n"
+    << "  --metrics_scenario_name <name>\n";
 }
 
 void PrintEffectiveConfig(const RunConfig& config,
@@ -512,13 +506,20 @@ void PrintEffectiveConfig(const RunConfig& config,
   std::cout << "  approach: " << config.approach << '\n';
   std::cout << "  shift_method: " << config.shift_method << '\n';
   std::cout << "  route_search_threads: " << config.route_search_threads << '\n';
-  std::cout << "  max_standard_iterations: " << config.max_standard_iterations << '\n';
-  std::cout << "  max_optimality_condition_iterations: "
-            << config.max_optimality_condition_iterations << '\n';
-  std::cout << "  optimization_tolerance: " << config.optimization_tolerance << '\n';
   std::cout << "  budget_upper_bound: " << config.budget_upper_bound << '\n';
-  std::cout << "  nlopt_algorithm: " << config.nlopt_algorithm << '\n';
   std::cout << "  metrics.output_root: " << config.metrics.output_root << '\n';
+  if (!config.metrics.scenario_name.empty()) {
+    std::cout << "  metrics.scenario_name: " << config.metrics.scenario_name << '\n';
+  }
+  std::cout << "  pipeline steps: " << config.step_sections.size() << '\n';
+  for (const auto& [index, step] : config.step_sections) {
+    std::cout << "    [step." << index << "] type=" << step.type;
+    if (!step.algorithm.empty()) std::cout << " algorithm=" << step.algorithm;
+    std::cout << " max_iter=" << step.max_iterations;
+    if (step.tolerance > 0) std::cout << " tol=" << step.tolerance;
+    if (step.population_size > 0) std::cout << " pop_size=" << step.population_size;
+    std::cout << '\n';
+  }
   std::cout << std::endl;
 }
 
@@ -569,29 +570,40 @@ int main(int argc, char** argv) {
     loader.SetVerbose(config.loader_verbose);
     auto constraints = loader.LoadFromFile(constraints_path.string());
 
-    const nlopt::algorithm algorithm = ParseNloptAlgorithm(config.nlopt_algorithm);
+    if (config.step_sections.empty()) {
+      throw std::runtime_error(
+        "No [step.N] sections found in config. At least one optimization step "
+        "must be defined. Example:\n"
+        "  [step.0]\n"
+        "  type = nlopt\n"
+        "  algorithm = LN_COBYLA\n"
+        "  max_iterations = 100\n"
+      );
+    }
+
+    std::vector<TrafficAssignment::OptimizationStepConfig> steps;
+    for (const auto& [index, step_config] : config.step_sections) {
+      steps.push_back(step_config);
+    }
+
+    std::cout << "Creating BilevelCND solver..." << std::endl;
     TrafficAssignment::BilevelCND<long double> cnd(
       network,
       approach,
       constraints,
-      config.max_standard_iterations,
-      config.max_optimality_condition_iterations,
-      config.optimization_tolerance,
+      steps,
       config.link_capacity_selection_threshold,
       config.budget_threshold,
       config.budget_function_multiplier,
       config.budget_upper_bound,
-      algorithm,
       config.metrics,
       config.route_search_threads
     );
 
-    std::cout << "Creating BilevelCND solver..." << std::endl;
     std::cout << "      BilevelCND solver created" << std::endl;
     std::cout << "      Design variables: " << constraints.size() << std::endl;
 
     std::cout << "\nRunning bilevel optimization..." << std::endl;
-    std::cout << "      (Requires complete Network and TA implementation)" << std::endl;
 
     cnd.ComputeNetworkDesign();
     return 0;

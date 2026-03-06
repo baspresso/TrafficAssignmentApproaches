@@ -10,6 +10,7 @@
 #include <sstream>
 #include <algorithm>
 #include <limits>
+#include <nlopt.hpp>
 #include "../tap/algorithms/common/TrafficAssignmentApproach.h"
 #include "../tap/core/Network.h"
 #include "DirectedConstraintLoader.h"
