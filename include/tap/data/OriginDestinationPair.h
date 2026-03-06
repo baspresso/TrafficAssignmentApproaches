@@ -81,7 +81,7 @@ public:
    * @brief Returns unique links used by all routes of this O-D pair.
    * @note O(n log n) due to sorting and deduplication.
    */
-  std::vector <int> GetUsedLinks() {
+  std::vector <int> GetUsedLinks() const {
     std::vector <int> used_links;
     for (int i = 0; i < routes_.size(); i++) {
       for (auto now : routes_[i]) {
@@ -97,7 +97,7 @@ public:
    * @brief Finds the first route with all zero-capacity links and returns its delay.
    * @return Delay of the first zero-capacity route, or -1 if none exist.
    */
-  T GetZeroCapacityRouteDelay() {
+  T GetZeroCapacityRouteDelay() const {
     for (int i = 0; i < this->routes_.size(); i++) {
       if (!Link<T>::CheckNonZeroLinksCapacity(this->network_.links(), this->routes_[i])) {
         return Link<T>::GetLinksDelay(this->network_.links(), this->routes_[i]);
@@ -107,22 +107,27 @@ public:
   }
 
   std::vector<T> SetRoutesFlow(std::vector<T> routes_flow_update) {
-      // 1. Remove previous contributions from network
+      // 1. Validate: ensure at least one route has positive flow before modifying state
+      bool has_positive = false;
+      for (const auto& flow : routes_flow_update) {
+          if (flow > 0) { has_positive = true; break; }
+      }
+      if (!has_positive) {
+          throw std::invalid_argument("All route flows are non-positive");
+      }
+
+      // 2. Remove previous contributions from network
       for (const auto& [link_id, flow] : links_flow_) {
-          network_.SetLinkFlow(link_id, -flow); // Subtract old flow
+          network_.SetLinkFlow(link_id, -flow);
       }
       links_flow_.clear();
 
-      // 2. Filter invalid routes (non-positive flows)
+      // 3. Filter invalid routes (non-positive flows)
       for (int i = routes_flow_update.size() - 1; i >= 0; --i) {
           if (routes_flow_update[i] <= 0) {
               routes_.erase(routes_.begin() + i);
               routes_flow_update.erase(routes_flow_update.begin() + i);
           }
-      }
-
-      if (routes_flow_update.empty()) {
-          throw std::invalid_argument("All route flows are non-positive");
       }
 
       // 3. Normalize flows to meet total demand
@@ -182,7 +187,7 @@ public:
 
     return true;
   }
-  T RoutesDelta() {
+  T RoutesDelta() const {
     T delay_min = MAX_ROUTE_DELAY, delay_max = 0, delay_route = 0;
     if (routes_.size() > 0) {
       delay_route = Link<T>::GetLinksDelay(network_.links(), routes_[0]);
@@ -194,10 +199,10 @@ public:
       delay_min = std::min(delay_min, delay_route);
       delay_max = std::max(delay_max, delay_route);
     }
-    return abs(delay_max - delay_min);
+    return std::abs(delay_max - delay_min);
   }
 
-  std::vector <T> RoutesDelays() {
+  std::vector <T> RoutesDelays() const {
     std::vector <T> routes_delays(routes_.size());
     for (int i = 0; i < routes_.size(); i++) {
       routes_delays[i] = Link<T>::GetLinksDelay(network_.links(), routes_[i]);
@@ -205,7 +210,7 @@ public:
     return routes_delays;
   }
 
-  bool CheckNonZeroCapacityRoutes() {
+  bool CheckNonZeroCapacityRoutes() const {
     bool fl = true;
     for (int i = 0; i < this->routes_.size(); i++) {
       if (!Link<T>::CheckNonZeroLinksCapacity(network_.links(), this->routes_[i])) {

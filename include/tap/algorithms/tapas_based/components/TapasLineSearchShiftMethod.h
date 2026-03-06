@@ -11,7 +11,7 @@ namespace TrafficAssignment {
 
     ~TapasLineSearchShiftMethod() {}
 
-    std::pair <T, T> FlowShift(T starting_point, std::pair <std::vector <int>, std::vector <int>> pas, std::pair <T, T> total_flow) override {
+    std::pair <T, T> FlowShift(T starting_point, const std::pair <std::vector <int>, std::vector <int>>& pas, std::pair <T, T> total_flow) override {
       T flow_shift = starting_point;
       // Flow is being tranfered from / to the first part of the PAS if direction is true / false
       bool direction;

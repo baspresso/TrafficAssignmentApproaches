@@ -134,7 +134,7 @@ namespace TrafficAssignment {
      * @param links_list Indices of links to include in the calculation.
      * @return Sum of delay derivatives for the specified links (minutes/vehicle).
      */
-    static T GetLinksDelayDer(std::vector <Link <T>>& links, const std::vector <int>& links_list) {
+    static T GetLinksDelayDer(const std::vector <Link <T>>& links, const std::vector <int>& links_list) {
       T ans = 0;
       for (auto now : links_list) {
         ans += links[now].DelayDer();
@@ -148,7 +148,7 @@ namespace TrafficAssignment {
      * @param links_list Indices of links to include in the calculation.
      * @return Sum of second derivatives for the specified links (minutes/vehicle²).
      */
-    static T GetLinksDelaySecondDer(std::vector <Link <T>>& links, const std::vector <int>& links_list) {
+    static T GetLinksDelaySecondDer(const std::vector <Link <T>>& links, const std::vector <int>& links_list) {
       T ans = 0;
       for (auto now : links_list) {
         ans += links[now].DelaySecondDer();
@@ -172,7 +172,7 @@ namespace TrafficAssignment {
      * @param links_list Indices of links to check.
      * @return True if at least one link has capacity > 0, false otherwise.
      */
-    static bool CheckNonZeroLinksCapacity(std::vector <Link <T>>& links, const std::vector <int>& links_list) {
+    static bool CheckNonZeroLinksCapacity(const std::vector <Link <T>>& links, const std::vector <int>& links_list) {
       bool ans = false;
       for (auto now : links_list) {
         if (links[now].capacity != 0) {
@@ -186,7 +186,7 @@ namespace TrafficAssignment {
   template <typename T>
   T CalculateJacobiElement(const std::vector<int>& route_i,
                            const std::vector<int>& route_j,
-                           std::vector <Link<T>>& links) {
+                           const std::vector <Link<T>>& links) {
     T sum = 0;
     std::unordered_set<int> links_i(route_i.begin(), route_i.end());
     
@@ -199,7 +199,7 @@ namespace TrafficAssignment {
   }
 
   template <typename T>
-  Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> RoutesJacobiMatrix(const std::vector<std::vector <int>>& routes, std::vector <Link<T>>& links) {
+  Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> RoutesJacobiMatrix(const std::vector<std::vector <int>>& routes, const std::vector <Link<T>>& links) {
     const size_t R = routes.size();
     Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> J(R, R);
 

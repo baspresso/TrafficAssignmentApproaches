@@ -13,13 +13,15 @@ namespace TrafficAssignment {
 template <typename T>
 class StatisticsRecorder {
 public:
-    StatisticsRecorder(Network<T>& network) : 
+    StatisticsRecorder(Network<T>& network) :
         network_(network),
         time_on_statistics_(0.0),
-        is_recording_(false) 
+        is_recording_(false)
     {
         recording_start_ = std::chrono::high_resolution_clock::now();
     }
+
+    void SetOutputRoot(const std::string& root) { output_root_ = root; }
 
     void StartRecording(std::string approach_name) {
         if(is_recording_) return;
@@ -82,10 +84,12 @@ private:
     std::string file_path_;
     std::string dataset_name_;
     std::string approach_name_;
+    std::string output_root_;
 
     void InitializeOutputFile() {
         // Create results directory
-        const std::string dir_path = "../performance_results/" + dataset_name_;
+        const std::string base = output_root_.empty() ? "../performance_results" : output_root_;
+        const std::string dir_path = base + "/" + dataset_name_;
         std::filesystem::create_directories(dir_path);
         
         // Create unique filename

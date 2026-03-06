@@ -17,7 +17,7 @@ namespace TrafficAssignment {
    * @tparam T Data type for flow/capacity values (e.g., double).
    */
 template <typename T>
-class Network : public std::enable_shared_from_this<Network<T>> {
+class Network {
 public:
 
     /**
@@ -103,8 +103,8 @@ public:
 
     const std::vector<std::map<int, int>>& origin_info() const { return origin_info_; }
 
-    std::size_t link_id(std::size_t init_node, std::size_t term_node) {
-      return link_id_map_[{init_node, term_node}];
+    std::size_t link_id(std::size_t init_node, std::size_t term_node) const {
+      return link_id_map_.at({init_node, term_node});
     }
     
     // Mutable accessors for algorithm manipulation
@@ -145,7 +145,6 @@ public:
         std::vector <int> destinations;
         while (cnt_not_processed > 0) {
           if (q.empty()) {
-            std::cout << "???\n";
             break;
           }
           if (q.top().second != -1) {
@@ -197,9 +196,9 @@ public:
       return total;
     }
 
-    T TotalTravelTime() {
+    T TotalTravelTime() const {
       T total_travel_time = 0;
-      for (auto now : links_) {
+      for (const auto& now : links_) {
         total_travel_time += now.flow * now.Delay();
       }
       return total_travel_time;

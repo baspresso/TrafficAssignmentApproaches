@@ -55,22 +55,32 @@ target_link_libraries(main PRIVATE
     optimlib
 )
 
+add_executable(tap_runner src/tap_main.cpp)
+
+target_link_libraries(tap_runner PRIVATE
+    Eigen3::Eigen
+    Boost::multiprecision
+)
+
 # MinGW debug builds hit the COFF section limit on large TUs; -Wa,-mbig-obj raises it.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(main PRIVATE $<$<CONFIG:Debug>:-Wa,-mbig-obj>)
+    target_compile_options(tap_runner PRIVATE $<$<CONFIG:Debug>:-Wa,-mbig-obj>)
 endif()
 
 if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     get_filename_component(MINGW_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
     foreach(MINGW_RUNTIME_DLL libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
         if(EXISTS "${MINGW_BIN_DIR}/${MINGW_RUNTIME_DLL}")
-            add_custom_command(
-                TARGET main
-                POST_BUILD
-                COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                        "${MINGW_BIN_DIR}/${MINGW_RUNTIME_DLL}"
-                        "$<TARGET_FILE_DIR:main>"
-            )
+            foreach(TARGET_EXE main tap_runner)
+                add_custom_command(
+                    TARGET ${TARGET_EXE}
+                    POST_BUILD
+                    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                            "${MINGW_BIN_DIR}/${MINGW_RUNTIME_DLL}"
+                            "$<TARGET_FILE_DIR:${TARGET_EXE}>"
+                )
+            endforeach()
         endif()
     endforeach()
 endif()

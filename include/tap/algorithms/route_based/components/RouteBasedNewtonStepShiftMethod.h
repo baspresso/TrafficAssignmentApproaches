@@ -17,7 +17,7 @@ namespace TrafficAssignment {
       auto& od_pair = this->od_pairs()[od_index];
       const int routes_count = od_pair.GetRoutesCount();
       auto [min_max_diff, min_index, max_index] = MinMaxRoutes(od_pair); 
-      if (min_max_diff < computational_treshold_) {
+      if (min_max_diff < computational_threshold_) {
         return od_pair.GetRoutesFlow();
       }
       auto [min_route_non_intersecting, max_route_non_intersecting] =
@@ -29,7 +29,7 @@ namespace TrafficAssignment {
       return new_flows;
     }
   private:
-    const T computational_treshold_ = 1e-10;
+    const T computational_threshold_ = 1e-10;
     std::tuple <T, int, int> MinMaxRoutes(const OriginDestinationPair <T>& od_pair) {
         std::vector <std::vector <int>> routes = od_pair.GetRoutes();
         const int routes_count = od_pair.GetRoutesCount();
@@ -88,6 +88,9 @@ namespace TrafficAssignment {
       for (auto link_index : max_route_non_intersecting) {
         routes_delays.second += this->network_.links()[link_index].Delay(this->network_.links()[link_index].flow);
         sum_routes_delays_der += this->network_.links()[link_index].DelayDer(this->network_.links()[link_index].flow);
+      }
+      if (sum_routes_delays_der == 0) {
+        return 0;
       }
       T delta = std::abs(routes_delays.first - routes_delays.second) / sum_routes_delays_der;
       return delta;

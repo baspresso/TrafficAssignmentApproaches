@@ -6,7 +6,6 @@
 #include <unordered_map>
 #include <map>
 #include <cstddef>
-#include "../../utils/DataProcessor.h"
 #include "../../utils/StatisticsRecorder.h"
 #include "../../core/Network.h"
 
@@ -33,6 +32,10 @@ namespace TrafficAssignment {
 
     virtual std::size_t GetRouteSearchThreadCount() const {
       return 1;
+    }
+
+    void SetOutputRoot(const std::string& root) {
+      statistics_recorder_.SetOutputRoot(root);
     }
 
     void Reset() {

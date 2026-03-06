@@ -110,7 +110,7 @@ private:
 
     // Helper methods
     fs::path GetDatasetPath(const std::string& dataset_name) {
-        static const fs::path base_path = "C:/Projects/TrafficAssignmentApproaches/data/TransportationNetworks";
+        static const fs::path base_path = "data/TransportationNetworks";
         return base_path / dataset_name;
     }
 

@@ -1,7 +1,6 @@
 #ifndef ROUTE_BASED_APPROACH_H
 #define ROUTE_BASED_APPROACH_H
 
-#include <queue>
 #include <string>
 #include <algorithm>
 #include <atomic>
@@ -19,9 +18,17 @@ namespace TrafficAssignment {
     RouteBasedApproach(Network<T>& network,
                        T alpha = 1e-14,
                        std::string shift_method_name = "NewtonStep",
-                       std::size_t route_search_thread_count = 1)
+                       std::size_t route_search_thread_count = 1,
+                       int max_iterations = 200,
+                       int full_iteration_count = 3,
+                       int origin_iteration_count = 1,
+                       T ema_alpha = 0.7)
       : TrafficAssignmentApproach<T>(network, alpha),
-        route_search_thread_count_(NormalizeThreadCount(route_search_thread_count))
+        route_search_thread_count_(NormalizeThreadCount(route_search_thread_count)),
+        max_iterations_(max_iterations),
+        full_iteration_count_(full_iteration_count),
+        origin_iteration_count_(origin_iteration_count),
+        ema_alpha_(ema_alpha)
     {
         shift_method_ = RouteBasedShiftMethodFactory<T>::GetInstance().Create(shift_method_name, this->network_);
         shift_method_name_ = shift_method_name;
@@ -50,7 +57,7 @@ namespace TrafficAssignment {
         this->statistics_recorder_.RecordStatistics();
       }
 
-      while (iteration_count++ < 200) {
+      while (iteration_count++ < max_iterations_) {
         ResetExpectedDecreases();
         ProcessOrigins();
         ProcessODPairs(statistics_recording);
@@ -61,9 +68,10 @@ namespace TrafficAssignment {
     }
 
   protected:
-    const int full_iteration_count_ = 3;
-    const int origin_iteration_count_ = 1;
-    const T alpha_ = 0.7;
+    int max_iterations_;
+    int full_iteration_count_;
+    int origin_iteration_count_;
+    T ema_alpha_;
     static constexpr int min_parallel_links_count_ = 200;
     static constexpr std::size_t min_parallel_tasks_total_ = 32;
     std::unique_ptr <RouteBasedShiftMethod <T>> shift_method_;
@@ -214,23 +222,21 @@ namespace TrafficAssignment {
         }
     }
 
-    std::priority_queue<std::pair<T, int>> PrepareODQueue() {
-        std::priority_queue<std::pair<T, int>> od_queue;
+    std::vector<std::pair<T, int>> PrepareODQueue() {
+        std::vector<std::pair<T, int>> od_queue;
         const auto& od_pairs = this->network().od_pairs();
-        
-        for (int od_index = 0; od_index < od_pairs.size(); od_index++) {
+
+        for (int od_index = 0; od_index < static_cast<int>(od_pairs.size()); od_index++) {
             if (od_pairs[od_index].GetRoutesCount() > 1) {
-                od_queue.emplace(objective_function_expected_decrease_[od_index], od_index);
+                od_queue.emplace_back(objective_function_expected_decrease_[od_index], od_index);
             }
         }
+        std::sort(od_queue.begin(), od_queue.end(), std::greater<>());
         return od_queue;
     }
 
-    void ProcessODQueue(std::priority_queue<std::pair<T, int>>& od_queue) {
-        auto temp_queue = od_queue;  // Work on a copy of the queue
-        while (!temp_queue.empty()) {
-            const auto [_, od_index] = temp_queue.top();
-            temp_queue.pop();
+    void ProcessODQueue(const std::vector<std::pair<T, int>>& od_queue) {
+        for (const auto& [_, od_index] : od_queue) {
             ExecuteFlowShift(od_index);
         }
     }
@@ -254,8 +260,8 @@ namespace TrafficAssignment {
         T delta = std::abs(before - after);
         auto& current = objective_function_expected_decrease_[od_index];
         
-        current = (current == 0) ? delta : 
-            (1 - alpha_) * delta + alpha_ * current;
+        current = (current == 0) ? delta :
+            (1 - ema_alpha_) * delta + ema_alpha_ * current;
     }
     
     std::vector <T> FlowShift(int od_pair_index) {

@@ -11,7 +11,7 @@ namespace TrafficAssignment {
 
     ~TapasAdvancedGradientDescentShiftMethod() {}
 
-    std::pair <T, T> FlowShift(T starting_point, std::pair <std::vector <int>, std::vector <int>> pas, std::pair <T, T> total_flow) override {
+    std::pair <T, T> FlowShift(T starting_point, const std::pair <std::vector <int>, std::vector <int>>& pas, std::pair <T, T> total_flow) override {
       T flow_shift = 0;
       // Flow is being tranfered from / to the first part of the PAS if direction is true / false
       bool direction;
@@ -23,7 +23,7 @@ namespace TrafficAssignment {
       }
       double min_flow = std::min(total_flow.first, total_flow.second);
       double max_flow = std::max(total_flow.first, total_flow.second);
-      if (min_flow < this->computational_treshold_) {
+      if (min_flow < this->computational_threshold_) {
         if (direction) {
           return { -max_flow / 2, max_flow / 2 };
         }
@@ -33,9 +33,11 @@ namespace TrafficAssignment {
       }
       std::pair <T, T> pas_der = { Link<T>::GetLinksDelayDer(this->links_, pas.first), Link<T>::GetLinksDelayDer(this->links_, pas.second) };
       std::pair <T, T> pas_second_der = { Link<T>::GetLinksDelaySecondDer(this->links_, pas.first), Link<T>::GetLinksDelaySecondDer(this->links_, pas.second) };
+      if (pas_second_der.first == 0 || pas_second_der.second == 0) {
+        return {0, 0};
+      }
       std::pair <T, T> ders_ratio = { pas_der.first / (pas_second_der.first), pas_der.second / (pas_second_der.second) };
       flow_shift = -ders_ratio.first + (ders_ratio.first + ders_ratio.second) / (pas_second_der.first) / (1 / (pas_second_der.first) + 1 / (pas_second_der.second));
-      std::cout << flow_shift << '\n';
       return { flow_shift, -flow_shift };
     }
 

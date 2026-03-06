@@ -11,7 +11,7 @@ namespace TrafficAssignment {
 
     ~TapasNewtonStepShiftMethod() {}
 
-    std::pair <T, T> FlowShift(T starting_point, std::pair <std::vector <int>, std::vector <int>> pas, std::pair <T, T> total_flow) override {
+    std::pair <T, T> FlowShift(T starting_point, const std::pair <std::vector <int>, std::vector <int>>& pas, std::pair <T, T> total_flow) override {
       // Flow is being tranfered from / to the first part of the PAS if direction is true / false
       std::pair <T, T> pas_delay = { 0, 0 };
       for (auto link_index : pas.first) {
@@ -27,6 +27,9 @@ namespace TrafficAssignment {
       }
       for (auto link_index : pas.second) {
         sum_pas_delays_der += this->links_[link_index].DelayDer(this->links_[link_index].flow);
+      }
+      if (sum_pas_delays_der == 0) {
+        return {0, 0};
       }
       T delta = std::abs(pas_delay.first - pas_delay.second) / sum_pas_delays_der;
       if (direction) {

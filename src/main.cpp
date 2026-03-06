@@ -1,6 +1,3 @@
-#include <algorithm>
-#include <cctype>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -9,27 +6,22 @@
 #include <memory>
 #include <optional>
 #include <regex>
-#include <sstream>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 
+#include "../include/common/ConfigUtils.h"
 #include "../include/cnd/BilevelCND.h"
 #include "../include/cnd/DirectedConstraintLoader.h"
 #include "../include/cnd/OptimizationStep.h"
-#include "../include/tap/algorithms/demand_based/PumpOutDemandBasedApproach.h"
 #include "../include/tap/algorithms/route_based/RouteBasedApproach.h"
 #include "../include/tap/algorithms/tapas_based/TapasApproach.h"
 #include "../include/tap/core/NetworkBuilder.h"
 
 namespace fs = std::filesystem;
 
-namespace {
+using namespace TrafficAssignment::ConfigUtils;
 
-struct CliOptions {
-  std::unordered_map<std::string, std::string> values;
-  bool help_requested = false;
-};
+namespace {
 
 struct RunConfig {
   std::string dataset = "SiouxFalls";
@@ -38,6 +30,14 @@ struct RunConfig {
   long double approach_alpha = 1e-14L;
   std::string shift_method = "NewtonStep";
   std::size_t route_search_threads = 1;
+
+  // TAP approach tuning (0 = use approach default)
+  int max_standard_iterations = 0;
+  int full_iteration_count = 0;        // RouteBased-specific
+  int origin_iteration_count = 0;      // RouteBased-specific
+  long double ema_alpha = 0.0L;        // RouteBased-specific
+  int pas_per_origin = 0;              // Tapas-specific
+  int pas_multiplier = 0;              // Tapas-specific
 
   long double link_capacity_selection_threshold = 1e-3L;
   long double budget_threshold = 1e-1L;
@@ -52,64 +52,6 @@ struct RunConfig {
   std::map<int, TrafficAssignment::OptimizationStepConfig> step_sections;
 };
 
-std::string ToLowerCopy(std::string text) {
-  std::transform(
-    text.begin(),
-    text.end(),
-    text.begin(),
-    [](unsigned char c) { return static_cast<char>(std::tolower(c)); }
-  );
-  return text;
-}
-
-std::string NormalizeKey(std::string key) {
-  key = ToLowerCopy(std::move(key));
-  std::replace(key.begin(), key.end(), '-', '_');
-  return key;
-}
-
-std::string TrimCopy(const std::string& text) {
-  const auto first = text.find_first_not_of(" \t\r\n");
-  if (first == std::string::npos) {
-    return "";
-  }
-  const auto last = text.find_last_not_of(" \t\r\n");
-  return text.substr(first, last - first + 1);
-}
-
-bool ParseBool(const std::string& raw_value, const std::string& field_name) {
-  const std::string value = ToLowerCopy(raw_value);
-  if (value == "1" || value == "true" || value == "yes" || value == "on") {
-    return true;
-  }
-  if (value == "0" || value == "false" || value == "no" || value == "off") {
-    return false;
-  }
-  throw std::runtime_error(
-    "Invalid boolean value for '" + field_name + "': '" + raw_value + "'"
-  );
-}
-
-template <typename T>
-T ParseNumber(const std::string& raw_value, const std::string& field_name) {
-  std::stringstream stream(raw_value);
-  T value {};
-  stream >> value;
-  if (stream.fail() || !stream.eof()) {
-    throw std::runtime_error(
-      "Invalid numeric value for '" + field_name + "': '" + raw_value + "'"
-    );
-  }
-  return value;
-}
-
-std::optional<std::string> GetEnvValue(const char* name) {
-  const char* value = std::getenv(name);
-  if (value == nullptr || value[0] == '\0') {
-    return std::nullopt;
-  }
-  return std::string(value);
-}
 
 void ApplyRunOption(RunConfig& config,
                     const std::string& raw_key,
@@ -137,6 +79,30 @@ void ApplyRunOption(RunConfig& config,
   }
   if (key == "route_search_threads" || key == "route_threads") {
     config.route_search_threads = ParseNumber<std::size_t>(raw_value, key);
+    return;
+  }
+  if (key == "max_standard_iterations" || key == "max_iters") {
+    config.max_standard_iterations = ParseNumber<int>(raw_value, key);
+    return;
+  }
+  if (key == "full_iteration_count") {
+    config.full_iteration_count = ParseNumber<int>(raw_value, key);
+    return;
+  }
+  if (key == "origin_iteration_count") {
+    config.origin_iteration_count = ParseNumber<int>(raw_value, key);
+    return;
+  }
+  if (key == "ema_alpha") {
+    config.ema_alpha = ParseNumber<long double>(raw_value, key);
+    return;
+  }
+  if (key == "pas_per_origin") {
+    config.pas_per_origin = ParseNumber<int>(raw_value, key);
+    return;
+  }
+  if (key == "pas_multiplier") {
+    config.pas_multiplier = ParseNumber<int>(raw_value, key);
     return;
   }
   if (key == "link_capacity_selection_threshold" || key == "link_threshold") {
@@ -238,66 +204,6 @@ void ApplyStepOption(TrafficAssignment::OptimizationStepConfig& step,
   }
 }
 
-CliOptions ParseCliOptions(int argc, char** argv) {
-  CliOptions cli;
-  for (int i = 1; i < argc; ++i) {
-    std::string arg = argv[i];
-    if (arg == "--help" || arg == "-h") {
-      cli.help_requested = true;
-      continue;
-    }
-    if (arg.rfind("--", 0) != 0) {
-      throw std::runtime_error("Unsupported argument format: '" + arg + "'");
-    }
-
-    arg = arg.substr(2);
-    std::string key;
-    std::string value;
-    const auto eq_pos = arg.find('=');
-    if (eq_pos != std::string::npos) {
-      key = arg.substr(0, eq_pos);
-      value = arg.substr(eq_pos + 1);
-    } else {
-      key = arg;
-      if ((i + 1) < argc && std::string(argv[i + 1]).rfind("--", 0) != 0) {
-        value = argv[++i];
-      } else {
-        value = "true";
-      }
-    }
-
-    cli.values[NormalizeKey(key)] = value;
-  }
-  return cli;
-}
-
-fs::path FindProjectRoot() {
-  fs::path current = fs::current_path();
-  while (true) {
-    if (fs::exists(current / "CMakeLists.txt") &&
-        fs::exists(current / "data" / "TransportationNetworks")) {
-      return current;
-    }
-    if (!current.has_parent_path() || current == current.parent_path()) {
-      return fs::current_path();
-    }
-    current = current.parent_path();
-  }
-}
-
-fs::path ResolvePath(const fs::path& raw_path, const fs::path& project_root) {
-  if (raw_path.empty()) {
-    return raw_path;
-  }
-  if (raw_path.is_absolute()) {
-    return raw_path;
-  }
-  if (fs::exists(project_root / raw_path)) {
-    return project_root / raw_path;
-  }
-  return fs::absolute(raw_path);
-}
-
 fs::path ResolveConstraintsPath(const RunConfig& config, const fs::path& project_root) {
   if (config.constraints_file.empty()) {
     return project_root / "data" / "TransportationNetworks" / config.dataset /
@@ -384,6 +290,12 @@ void ApplyEnvironmentOverrides(RunConfig& config) {
   apply_run("CND_APPROACH_ALPHA", "approach_alpha");
   apply_run("CND_SHIFT_METHOD", "shift_method");
   apply_run("CND_ROUTE_THREADS", "route_search_threads");
+  apply_run("CND_MAX_STANDARD_ITERATIONS", "max_standard_iterations");
+  apply_run("CND_FULL_ITERATION_COUNT", "full_iteration_count");
+  apply_run("CND_ORIGIN_ITERATION_COUNT", "origin_iteration_count");
+  apply_run("CND_EMA_ALPHA", "ema_alpha");
+  apply_run("CND_PAS_PER_ORIGIN", "pas_per_origin");
+  apply_run("CND_PAS_MULTIPLIER", "pas_multiplier");
   apply_run("CND_LINK_THRESHOLD", "link_capacity_selection_threshold");
   apply_run("CND_BUDGET_THRESHOLD", "budget_threshold");
   apply_run("CND_BUDGET_MULTIPLIER", "budget_function_multiplier");
@@ -423,26 +335,26 @@ CreateApproach(const RunConfig& config, TrafficAssignment::Network<long double>&
       network,
       config.approach_alpha,
       config.shift_method,
-      config.route_search_threads
+      config.route_search_threads,
+      config.max_standard_iterations > 0 ? config.max_standard_iterations : 200,
+      config.full_iteration_count > 0 ? config.full_iteration_count : 3,
+      config.origin_iteration_count > 0 ? config.origin_iteration_count : 1,
+      config.ema_alpha > 0.0L ? config.ema_alpha : 0.7L
     );
   }
   if (approach == "tapas") {
     return std::make_shared<TrafficAssignment::TapasApproach<long double>>(
       network,
       config.approach_alpha,
-      config.shift_method
+      config.shift_method,
+      config.max_standard_iterations > 0 ? config.max_standard_iterations : 20,
+      config.pas_per_origin > 0 ? config.pas_per_origin : 1,
+      config.pas_multiplier > 0 ? config.pas_multiplier : 5
     );
   }
-  if (approach == "demandbased" || approach == "demand_based" || approach == "pumpout") {
-    return std::make_shared<TrafficAssignment::PumpOutDemandBasedApproach<long double>>(
-      network,
-      config.approach_alpha
-    );
-  }
-
   throw std::runtime_error(
     "Unsupported approach '" + config.approach +
-    "'. Supported: RouteBased, Tapas, DemandBased."
+    "'. Supported: RouteBased, Tapas."
   );
 }
 
@@ -473,9 +385,15 @@ void PrintHelp() {
     << "  --config <path>                  INI config file path (required)\n"
     << "  --dataset <name>                 Dataset name (e.g. SiouxFalls)\n"
     << "  --constraints-file <path>        Constraints CSV path\n"
-    << "  --approach <RouteBased|Tapas|DemandBased>\n"
+    << "  --approach <RouteBased|Tapas>\n"
     << "  --shift-method <name>            Shift method (RouteBased/Tapas)\n"
     << "  --route-threads <n>              Route search thread count\n"
+    << "  --max-standard-iterations <n>    TAP iteration limit (default: 200/20)\n"
+    << "  --full-iteration-count <n>       RouteBased OD queue passes (default: 3)\n"
+    << "  --origin-iteration-count <n>     RouteBased per-origin passes (default: 1)\n"
+    << "  --ema-alpha <value>              RouteBased EMA smoothing (default: 0.7)\n"
+    << "  --pas-per-origin <n>             Tapas PAS per origin (default: 1)\n"
+    << "  --pas-multiplier <n>             Tapas PAS multiplier (default: 5)\n"
     << "  --link-threshold <value>\n"
     << "  --budget-threshold <value>\n"
     << "  --budget-multiplier <value>\n"
@@ -506,6 +424,18 @@ void PrintEffectiveConfig(const RunConfig& config,
   std::cout << "  approach: " << config.approach << '\n';
   std::cout << "  shift_method: " << config.shift_method << '\n';
   std::cout << "  route_search_threads: " << config.route_search_threads << '\n';
+  if (config.max_standard_iterations > 0)
+    std::cout << "  max_standard_iterations: " << config.max_standard_iterations << '\n';
+  if (config.full_iteration_count > 0)
+    std::cout << "  full_iteration_count: " << config.full_iteration_count << '\n';
+  if (config.origin_iteration_count > 0)
+    std::cout << "  origin_iteration_count: " << config.origin_iteration_count << '\n';
+  if (config.ema_alpha > 0.0L)
+    std::cout << "  ema_alpha: " << config.ema_alpha << '\n';
+  if (config.pas_per_origin > 0)
+    std::cout << "  pas_per_origin: " << config.pas_per_origin << '\n';
+  if (config.pas_multiplier > 0)
+    std::cout << "  pas_multiplier: " << config.pas_multiplier << '\n';
   std::cout << "  budget_upper_bound: " << config.budget_upper_bound << '\n';
   std::cout << "  metrics.output_root: " << config.metrics.output_root << '\n';
   if (!config.metrics.scenario_name.empty()) {

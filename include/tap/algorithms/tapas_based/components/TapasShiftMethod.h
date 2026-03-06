@@ -12,14 +12,14 @@ namespace TrafficAssignment {
     
     virtual ~TapasShiftMethod() = default;
 
-    virtual std::pair <T, T> FlowShift(T starting_point, std::pair <std::vector <int>, std::vector <int>> pas, std::pair <T, T> total_flow) = 0;
+    virtual std::pair <T, T> FlowShift(T starting_point, const std::pair <std::vector <int>, std::vector <int>>& pas, std::pair <T, T> total_flow) = 0;
   
   protected:
     const std::vector <Link <T>>& links_;
 
-    const double computational_treshold_ = 1e-7;
+    const double computational_threshold_ = 1e-7;
 
-    bool FlowShiftResult(const std::pair <std::vector <int>, std::vector <int>> pas, const std::pair <T, T> flow_shift) {
+    bool FlowShiftResult(const std::pair <std::vector <int>, std::vector <int>>& pas, const std::pair <T, T>& flow_shift) {
       std::pair <T, T> pas_delay = { 0, 0 };
       for (auto link_index : pas.first) {
         pas_delay.first += this->links_[link_index].Delay(this->links_[link_index].flow + flow_shift.first);
