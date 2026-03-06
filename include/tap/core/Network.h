@@ -138,8 +138,8 @@ public:
         std::vector <std::pair <int, std::vector <int>>> best_routes;
         int u;
         q.push({ 0, -1 });
-        std::unordered_set <int> processed;
-        std::unordered_map <int, int> used_link;
+        std::vector<bool> processed(number_of_nodes_, false);
+        std::vector<int> used_link(number_of_nodes_, -1);
         T cur_delay;
         int cnt_not_processed = origin_info_[origin].size();
         std::vector <int> destinations;
@@ -153,16 +153,16 @@ public:
           else {
             u = origin;
           }
-          if (processed.count(u)) {
+          if (processed[u]) {
             q.pop();
             continue;
           }
           cur_delay = q.top().first;
-          processed.insert(u);
+          processed[u] = true;
           used_link[u] = q.top().second;
           q.pop();
           for (auto now : adjacency_list_[u]) {
-            if (!processed.count(links_[now].term)) {
+            if (!processed[links_[now].term]) {
               q.push({ cur_delay + links_[now].Delay(), now });
             }
           }
@@ -303,12 +303,12 @@ private:
      * @param used_link Map of node-to-link connections from pathfinding.
      * @return Ordered list of link IDs from origin to destination.
      */
-    std::vector <int> RestoreRoute(int origin, int dest, const std::unordered_map <int, int>& used_link) const {
+    std::vector <int> RestoreRoute(int origin, int dest, const std::vector<int>& used_link) const {
         int now = dest;
         std::vector <int> new_route;
         while (now != origin) {
-          new_route.push_back(used_link.at(now));
-          now = links_[used_link.at(now)].init;
+          new_route.push_back(used_link[now]);
+          now = links_[used_link[now]].init;
         }
         reverse(new_route.begin(), new_route.end());
         return new_route;

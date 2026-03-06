@@ -38,7 +38,7 @@ namespace TrafficAssignment {
       statistics_recorder_.SetOutputRoot(root);
     }
 
-    void Reset() {
+    virtual void Reset() {
       network_.Reset();
     }
 

@@ -30,6 +30,8 @@ namespace TrafficAssignment {
     const T power;            ///< BPR exponent (typical value: 4).
     const T speed;            ///< Speed limit (km/h or mph).
     const T toll;             ///< Toll cost for using the link (monetary units).
+    const int power_int_;
+    const bool is_integer_power_;
 
     T flow = 0; ///< Current traffic flow on the link (vehicles/hour).
 
@@ -49,10 +51,23 @@ namespace TrafficAssignment {
     Link(int init, int term, T capacity, T length,
       T free_flow_time, T b, T power, T speed, T toll, int type) :
       init(init), term(term), type(type), capacity(capacity), length(length),
-      free_flow_time(free_flow_time), b(b), power(power), speed(speed), toll(toll), flow(0) { };
+      free_flow_time(free_flow_time), b(b), power(power), speed(speed), toll(toll),
+      power_int_(static_cast<int>(power)),
+      is_integer_power_(power == static_cast<T>(static_cast<int>(power))), flow(0) { };
 
     /// @brief Default destructor (no dynamic memory to manage).
     ~Link() = default;
+
+    static T IntPow(T base, int exp) {
+      if (exp < 0) return T(1) / IntPow(base, -exp);
+      T result = 1;
+      while (exp > 0) {
+        if (exp & 1) result *= base;
+        base *= base;
+        exp >>= 1;
+      }
+      return result;
+    }
 
     /**
      * @brief Computes travel time using the BPR delay function.
@@ -66,7 +81,12 @@ namespace TrafficAssignment {
       if (capacity == 0 || b == 0) {
         return free_flow_time;
       }
-      return free_flow_time + b * free_flow_time * std::pow(temp_flow, power) / std::pow(capacity, power);
+      T ratio = temp_flow / capacity;
+      if (ratio < 0) ratio = 0;
+      if (is_integer_power_) {
+        return free_flow_time + b * free_flow_time * IntPow(ratio, power_int_);
+      }
+      return free_flow_time + b * free_flow_time * std::pow(ratio, power);
     }
 
     /**
@@ -81,7 +101,12 @@ namespace TrafficAssignment {
       if (capacity == 0 || b == 0) {
         return free_flow_time * temp_flow;
       }
-      return free_flow_time * (temp_flow + b * capacity * std::pow(temp_flow / capacity, power + 1) / (power + 1));
+      T ratio = temp_flow / capacity;
+      if (ratio < 0) ratio = 0;
+      if (is_integer_power_) {
+        return free_flow_time * (temp_flow + b * capacity * IntPow(ratio, power_int_ + 1) / (power + 1));
+      }
+      return free_flow_time * (temp_flow + b * capacity * std::pow(ratio, power + 1) / (power + 1));
     }
 
     /**
@@ -96,7 +121,12 @@ namespace TrafficAssignment {
       if (capacity == 0 || b == 0) {
         return 0;
       }
-      return free_flow_time * b * power * std::pow(temp_flow / capacity, power - 1) / capacity;
+      T ratio = temp_flow / capacity;
+      if (ratio < 0) ratio = 0;
+      if (is_integer_power_) {
+        return free_flow_time * b * power * IntPow(ratio, power_int_ - 1) / capacity;
+      }
+      return free_flow_time * b * power * std::pow(ratio, power - 1) / capacity;
     }
 
     /**
@@ -111,7 +141,12 @@ namespace TrafficAssignment {
       if (capacity == 0) {
         return 0;
       }
-      return free_flow_time * b * power * (power - 1) * std::pow(temp_flow, power - 2) / std::pow(capacity, power);
+      T ratio = temp_flow / capacity;
+      if (ratio < 0) ratio = 0;
+      if (is_integer_power_) {
+        return free_flow_time * b * power * (power - 1) * IntPow(ratio, power_int_ - 2) / (capacity * capacity);
+      }
+      return free_flow_time * b * power * (power - 1) * std::pow(ratio, power - 2) / (capacity * capacity);
     }
 
     /**
@@ -163,7 +198,12 @@ namespace TrafficAssignment {
       if (capacity == 0 || b == 0) {
         return 0;
       }
-      return -power * b * free_flow_time * std::pow(temp_flow / capacity, power) / capacity;
+      T ratio = temp_flow / capacity;
+      if (ratio < 0) ratio = 0;
+      if (is_integer_power_) {
+        return -power * b * free_flow_time * IntPow(ratio, power_int_) / capacity;
+      }
+      return -power * b * free_flow_time * std::pow(ratio, power) / capacity;
     }
 
     /**

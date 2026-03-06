@@ -7,6 +7,7 @@
 #include <queue>
 #include <string>
 #include <random>
+#include <algorithm>
 #include <map>
 #include "../common/TrafficAssignmentApproach.h"
 #include "./components/TapasShiftMethod.h"
@@ -26,7 +27,8 @@ namespace TrafficAssignment {
       : TrafficAssignmentApproach<T>::TrafficAssignmentApproach(network, alpha),
         max_iterations_(max_iterations),
         pas_per_origin_(pas_per_origin),
-        pas_multiplier_(pas_multiplier) {
+        pas_multiplier_(pas_multiplier),
+        rng_(std::random_device{}()) {
 
       shift_method_ = TapasShiftMethodFactory<T>::GetInstance().Create(shift_method_name, this->GetLinksRef());
       this->shift_method_name_ = shift_method_name;
@@ -40,7 +42,8 @@ namespace TrafficAssignment {
       bush_links_flows_.resize(this->number_of_origins_);
       origin_link_corresponding_pas_.resize(this->number_of_origins_);
       origin_corresponding_pas_set_.resize(this->number_of_origins_);
-      links_origin_least_cost_routes_tree_.resize(this->number_of_origins_);
+      links_origin_least_cost_routes_tree_.resize(this->number_of_origins_,
+          std::vector<bool>(this->network_.number_of_links(), false));
       parent_origin_least_cost_routes_tree_.resize(this->number_of_origins_);
       origin_link_pair_pas_.resize(this->number_of_origins_);
 
@@ -53,7 +56,14 @@ namespace TrafficAssignment {
 
     ~TapasApproach() = default;
 
+    void Reset() override {
+      TrafficAssignmentApproach<T>::Reset();
+      ClearInternalState();
+    }
+
     void ComputeTrafficFlows(bool statistics_recording = false) override {
+      this->network_.Reset();
+      ClearInternalState();
       if (statistics_recording) {
         this->statistics_recorder_.StartRecording(this->GetApproachName());
       }
@@ -63,9 +73,10 @@ namespace TrafficAssignment {
       }
       T prev = 0, now = 0;
       for (int i = 0; i < max_iterations_; i++) {
-        EquilibrationIteration(i + 1);
+        EquilibrationIteration(i + 1, statistics_recording);
         prev = now;
         now = this->network_.ObjectiveFunction();
+        if (i > 0 && prev > 0 && std::abs(now - prev) / prev < this->alpha_) break;
       }
     }
     
@@ -81,7 +92,9 @@ namespace TrafficAssignment {
 
     int number_of_origins_;
 
-    // stores all index of every origin 
+    std::mt19937 rng_;
+
+    // stores all index of every origin
     std::vector <int> origins_;
 
     // stores all destinations for every origin
@@ -101,7 +114,7 @@ namespace TrafficAssignment {
     std::vector <std::vector <int>> parent_origin_least_cost_routes_tree_;
 
     // For every origin stores links being used in least cost routes tree
-    std::vector <std::unordered_set <int>> links_origin_least_cost_routes_tree_;
+    std::vector <std::vector<bool>> links_origin_least_cost_routes_tree_;
 
     // For every pas we are going to calculate a hash corresponding to it
     std::unordered_map <int, std::pair <std::vector <int>, std::vector <int>>> reserved_pas_hash_;
@@ -120,6 +133,23 @@ namespace TrafficAssignment {
     int pas_processed_last_queue_update;
 
     std::vector <std::map <std::pair <int, int>, int>> origin_link_pair_pas_;
+
+    void ClearInternalState() {
+      for (int i = 0; i < number_of_origins_; i++) {
+        std::fill(bush_links_flows_[i].begin(), bush_links_flows_[i].end(), T(0));
+        std::fill(origin_link_corresponding_pas_[i].begin(), origin_link_corresponding_pas_[i].end(), -1);
+        origin_corresponding_pas_set_[i].clear();
+        std::fill(links_origin_least_cost_routes_tree_[i].begin(), links_origin_least_cost_routes_tree_[i].end(), false);
+        std::fill(parent_origin_least_cost_routes_tree_[i].begin(), parent_origin_least_cost_routes_tree_[i].end(), -1);
+        origin_link_pair_pas_[i].clear();
+      }
+      reserved_pas_hash_.clear();
+      pas_users_.clear();
+      pas_flow_shift_starting_point_.clear();
+      while (!delta_pas_queue.empty()) {
+        delta_pas_queue.pop();
+      }
+    }
 
     void AllOrNothingAssignment() {
       for (int origin_index = 0; origin_index < this->number_of_origins_; origin_index++) {
@@ -236,16 +266,17 @@ namespace TrafficAssignment {
 
     // For single origin fills parent_origin_least_cost_routes_tree_ and links_origin_least_cost_routes_tree_
     void BuildSingleOriginLeastCostRoutesTree(int origin_index) {
-      this->links_origin_least_cost_routes_tree_[origin_index].clear();
+      std::fill(this->links_origin_least_cost_routes_tree_[origin_index].begin(),
+                this->links_origin_least_cost_routes_tree_[origin_index].end(), false);
       int current_origin = this->origins_[origin_index];
-      // Pairs in q contain delay from origin and node index  
+      // Pairs in q contain delay from origin and node index
       std::priority_queue <std::pair <T, int>, std::vector <std::pair <T, int>>, std::greater <std::pair <T, int>>> q;
       int u;
       int link_index;
       int origin = this->origins_[origin_index];
       T cur_delay = 0;
       q.push({ 0, -1 });
-      std::unordered_set <int> processed;
+      std::vector<bool> processed(this->network_.number_of_nodes(), false);
       while (!q.empty()) {
         cur_delay = q.top().first;
         link_index = q.top().second;
@@ -256,17 +287,17 @@ namespace TrafficAssignment {
           u = origin;
         }
         q.pop();
-        if (processed.count(u)) {
+        if (processed[u]) {
           continue;
         }
         if (u != current_origin) {
           this->parent_origin_least_cost_routes_tree_[origin_index][u] = this->network_.links()[link_index].init;
-          this->links_origin_least_cost_routes_tree_[origin_index].insert(link_index);
+          this->links_origin_least_cost_routes_tree_[origin_index][link_index] = true;
         }
 
-        processed.insert(u);
+        processed[u] = true;
         for (const auto now : this->network_.adjacency()[u]) {
-          if (!processed.count(this->network_.links()[now].term)) {
+          if (!processed[this->network_.links()[now].term]) {
             q.push({ cur_delay + this->network_.links()[now].Delay(), now });
           }
         }
@@ -428,7 +459,7 @@ namespace TrafficAssignment {
     }
 
     bool LinkPasConstructionCondition(int origin_index, int link_index) {
-      if (this->links_origin_least_cost_routes_tree_[origin_index].count(link_index)) {
+      if (this->links_origin_least_cost_routes_tree_[origin_index][link_index]) {
         return false;
       }
       if (this->bush_links_flows_[origin_index][link_index] < this->computation_threshold_) {
@@ -456,11 +487,15 @@ namespace TrafficAssignment {
       }
     }
 
-    // Returns information about how much flow on PAS we have on every origin that is using it specifically
-    // pair reflects the information about two parts of PAS, unordered map indicates how much flow origin with origin_index has
-    std::pair <std::unordered_map <int, T>, std::unordered_map <int, T>> PasOriginsFlows(int pas_hash) {
-      std::pair <std::unordered_map <int, T>, std::unordered_map <int, T>> result;
-      const std::pair <std::vector <int>, std::vector <int>> pas = this->reserved_pas_hash_[pas_hash];
+    struct PasFlowInfo {
+      std::pair<T, T> totals;
+      std::pair<std::unordered_map<int, T>, std::unordered_map<int, T>> per_origin;
+    };
+
+    PasFlowInfo ComputePasFlowInfo(int pas_hash) {
+      PasFlowInfo info;
+      info.totals = {0, 0};
+      const auto& pas = this->reserved_pas_hash_[pas_hash];
       for (auto origin_index : this->pas_users_[pas_hash]) {
         T min_flow = -1;
         for (auto link_index : pas.first) {
@@ -471,7 +506,8 @@ namespace TrafficAssignment {
             min_flow = std::min(min_flow, this->bush_links_flows_[origin_index][link_index]);
           }
         }
-        result.first[origin_index] = min_flow;
+        info.per_origin.first[origin_index] = min_flow;
+        info.totals.first += min_flow;
       }
       for (auto origin_index : this->pas_users_[pas_hash]) {
         T min_flow = -1;
@@ -483,9 +519,10 @@ namespace TrafficAssignment {
             min_flow = std::min(min_flow, this->bush_links_flows_[origin_index][link_index]);
           }
         }
-        result.second[origin_index] = min_flow;
+        info.per_origin.second[origin_index] = min_flow;
+        info.totals.second += min_flow;
       }
-      return result;
+      return info;
     }
 
     std::pair <T, T> PasTotalAmountOfFlow(int pas_hash) {
@@ -530,17 +567,17 @@ namespace TrafficAssignment {
       return (pas_delay.first > pas_delay.second);
     }
 
-    std::unordered_map <int, T> PasProportion(const int pas_hash, const std::pair <T, T> flow_shift, const std::pair <T, T> total_pas_flow) {
-      std::pair <std::unordered_map <int, T>, std::unordered_map <int, T>> pas_origins_flows = this->PasOriginsFlows(pas_hash);
+    std::unordered_map <int, T> PasProportion(const int pas_hash, const std::pair <T, T> flow_shift, const std::pair <T, T> total_pas_flow,
+        const std::pair <std::unordered_map <int, T>, std::unordered_map <int, T>>& pas_origins_flows) {
       std::unordered_map <int, T> proportion;
       if (flow_shift.first < 0) {
         for (auto origin_index : this->pas_users_[pas_hash]) {
-          proportion[origin_index] = pas_origins_flows.first[origin_index] / total_pas_flow.first;
+          proportion[origin_index] = pas_origins_flows.first.at(origin_index) / total_pas_flow.first;
         }
       }
       else {
         for (auto origin_index : this->pas_users_[pas_hash]) {
-          proportion[origin_index] = pas_origins_flows.second[origin_index] / total_pas_flow.second;
+          proportion[origin_index] = pas_origins_flows.second.at(origin_index) / total_pas_flow.second;
         }
       }
       return proportion;
@@ -552,11 +589,12 @@ namespace TrafficAssignment {
     // the second value of flow_shift reflects how much flow is going to to be received (if positive) / shifted (if value is negative)
     // to the second part of PAS
     // values in this pair are supposed to have a format {x, -x}
-    void ImplementPasFlowShift(const int pas_hash, const std::pair <T, T> flow_shift, std::pair <T, T> total_pas_flow) {
+    void ImplementPasFlowShift(const int pas_hash, const std::pair <T, T> flow_shift, std::pair <T, T> total_pas_flow,
+        const std::pair <std::unordered_map <int, T>, std::unordered_map <int, T>>& pas_origins_flows) {
       if (std::abs(flow_shift.first) < this->computation_threshold_) {
         return;
       }
-      std::unordered_map <int, T> proportion = PasProportion(pas_hash, flow_shift, total_pas_flow);
+      std::unordered_map <int, T> proportion = PasProportion(pas_hash, flow_shift, total_pas_flow, pas_origins_flows);
       std::pair <std::vector <int>, std::vector <int>> cur_pas = this->reserved_pas_hash_[pas_hash];
       for (auto origin_index : this->pas_users_[pas_hash]) {
         for (auto link_index : cur_pas.first) {
@@ -600,7 +638,8 @@ namespace TrafficAssignment {
     }
 
     // If direction is true than shift is performed from the first to the second part of PAS
-    void ImplementFullPasFlowShift(const int pas_hash, const bool direction, const std::pair <T, T> total_pas_flow, bool elimination_flag) {
+    void ImplementFullPasFlowShift(const int pas_hash, const bool direction, const std::pair <T, T> total_pas_flow,
+        const std::pair <std::unordered_map <int, T>, std::unordered_map <int, T>>& pas_origins_flows, bool elimination_flag) {
       std::pair <std::vector <int>, std::vector <int>> cur_pas = this->reserved_pas_hash_[pas_hash];
       std::pair <T, T> flow_shift;
       if (direction) {
@@ -610,20 +649,21 @@ namespace TrafficAssignment {
         flow_shift = { total_pas_flow.second, -total_pas_flow.second };
       }
       if (std::abs(flow_shift.first)) {
-        ImplementPasFlowShift(pas_hash, flow_shift, total_pas_flow);
+        ImplementPasFlowShift(pas_hash, flow_shift, total_pas_flow, pas_origins_flows);
       }
       if (elimination_flag) {
         EliminatePas(pas_hash);
       }
     }
 
-    bool TryFullPasFlowShift(const int pas_hash, std::pair <T, T> total_flow, bool elimination_flag) {
+    bool TryFullPasFlowShift(const int pas_hash, std::pair <T, T> total_flow,
+        const std::pair <std::unordered_map <int, T>, std::unordered_map <int, T>>& pas_origins_flows, bool elimination_flag) {
       if (PasFlowShiftResult(pas_hash, { -total_flow.first, total_flow.first })) {
-        ImplementFullPasFlowShift(pas_hash, true, total_flow, elimination_flag);
+        ImplementFullPasFlowShift(pas_hash, true, total_flow, pas_origins_flows, elimination_flag);
         return true;
       }
       if (!PasFlowShiftResult(pas_hash, { total_flow.second, -total_flow.second })) {
-        ImplementFullPasFlowShift(pas_hash, false, total_flow, elimination_flag);
+        ImplementFullPasFlowShift(pas_hash, false, total_flow, pas_origins_flows, elimination_flag);
         return true;
       }
       return false;
@@ -662,16 +702,16 @@ namespace TrafficAssignment {
 
     // Flow shift under chosen PAS with "optimal" step size
     void PasFlowShift(const int pas_hash, bool elimination_flag) {
-      std::pair <T, T> total_pas_flow = this->PasTotalAmountOfFlow(pas_hash);
-      if (TryFullPasFlowShift(pas_hash, total_pas_flow, elimination_flag)) {
+      auto flow_info = this->ComputePasFlowInfo(pas_hash);
+      if (TryFullPasFlowShift(pas_hash, flow_info.totals, flow_info.per_origin, elimination_flag)) {
         return;
       }
       if (shift_method_ == nullptr) {
         throw std::runtime_error("shift_method_ is not initialized");
       }
-      std::pair <T, T> flow_shift = shift_method_->FlowShift(this->pas_flow_shift_starting_point_[pas_hash], this->reserved_pas_hash_[pas_hash], total_pas_flow);
+      std::pair <T, T> flow_shift = shift_method_->FlowShift(this->pas_flow_shift_starting_point_[pas_hash], this->reserved_pas_hash_[pas_hash], flow_info.totals);
       this->pas_flow_shift_starting_point_[pas_hash] = abs(flow_shift.first);
-      ImplementPasFlowShift(pas_hash, flow_shift, total_pas_flow);
+      ImplementPasFlowShift(pas_hash, flow_shift, flow_info.totals, flow_info.per_origin);
     }
 
 
@@ -681,9 +721,7 @@ namespace TrafficAssignment {
       for (const auto& [pas_hash, pas] : this->reserved_pas_hash_) {
         pas_subset.push_back(pas_hash);
       }
-      std::random_device rd;
-      std::mt19937 g(rd());
-      std::shuffle(pas_subset.begin(), pas_subset.end(), g);
+      std::shuffle(pas_subset.begin(), pas_subset.end(), rng_);
       return pas_subset;
     }
 
@@ -735,31 +773,28 @@ namespace TrafficAssignment {
       }
     }
 
-    void EquilibrationIteration(int iteration_number) {
+    void EquilibrationIteration(int iteration_number, bool statistics_recording = false) {
       UpdateDeltaPasQueue();
       std::vector <int> origin_order(number_of_origins_);
       for (int origin_index = 0; origin_index < this->number_of_origins_; origin_index++) {
         origin_order[origin_index] = origin_index;
       }
-      std::random_device rd;
-      std::mt19937 g(rd());
-      std::shuffle(origin_order.begin(), origin_order.end(), g);
+      std::shuffle(origin_order.begin(), origin_order.end(), rng_);
       for (int origin_index : origin_order) {
         BuildSingleOriginLeastCostRoutesTree(origin_index);
         SingleOriginLinksPasConstruction(origin_index);
         for (int cnt = 0; cnt < pas_per_origin_; cnt++) {
           PasProcessing(false);
-          this->statistics_recorder_.RecordStatistics();
         }
-        this->statistics_recorder_.RecordStatistics();
       }
-      for (int cnt = 0; cnt < iteration_number * pas_multiplier_; cnt++) {
-        for (int i = 0; i < reserved_pas_hash_.size(); i++) {
+      for (int cnt = 0; cnt < pas_multiplier_ * 4; cnt++) {
+        for (std::size_t i = 0; i < reserved_pas_hash_.size(); i++) {
           PasProcessing(true);
         }
+      }
+      if (statistics_recording) {
         this->statistics_recorder_.RecordStatistics();
       }
-      this->statistics_recorder_.RecordStatistics();
     }
 
     const std::vector <Link<T>>& GetLinksRef() {
