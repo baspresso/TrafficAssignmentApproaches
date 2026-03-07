@@ -23,14 +23,16 @@ namespace TrafficAssignment {
                   std::string shift_method_name = "NewtonStep",
                   int max_iterations = 20,
                   int pas_per_origin = 1,
-                  int pas_multiplier = 5)
+                  int pas_multiplier = 5,
+                  int rgap_check_interval = 5)
       : TrafficAssignmentApproach<T>::TrafficAssignmentApproach(network, alpha),
         max_iterations_(max_iterations),
         pas_per_origin_(pas_per_origin),
         pas_multiplier_(pas_multiplier),
+        rgap_check_interval_(rgap_check_interval),
         rng_(std::random_device{}()) {
 
-      shift_method_ = TapasShiftMethodFactory<T>::GetInstance().Create(shift_method_name, this->GetLinksRef());
+      shift_method_ = TapasShiftMethodFactory<T>::GetInstance().Create(shift_method_name, this->GetLinksRef(), computation_threshold_);
       this->shift_method_name_ = shift_method_name;
 
       for (int i = 0; i < this->network_.number_of_zones(); i++) {
@@ -71,12 +73,29 @@ namespace TrafficAssignment {
       if (statistics_recording) {
         this->statistics_recorder_.RecordStatistics();
       }
-      T prev = 0, now = 0;
+      T best_rgap = T(1);
+      int stall_count = 0;
       for (int i = 0; i < max_iterations_; i++) {
         EquilibrationIteration(i + 1, statistics_recording);
-        prev = now;
-        now = this->network_.ObjectiveFunction();
-        if (i > 0 && prev > 0 && std::abs(now - prev) / prev < this->alpha_) break;
+        if ((i + 1) % rgap_check_interval_ == 0) {
+          T rgap = this->network_.RelativeGap();
+          if (rgap >= 0 && rgap <= this->alpha_) {
+            break;
+          }
+          // Detect stalling: rgap hasn't improved by at least 0.1%
+          if (rgap < best_rgap * T(0.999)) {
+            best_rgap = rgap;
+            stall_count = 0;
+          } else {
+            stall_count++;
+          }
+          // After 3 stalled checks, restart bush flows + PAS
+          if (stall_count >= 3) {
+            RestartBushFlows();
+            EliminateAllPas();
+            stall_count = 0;
+          }
+        }
       }
     }
     
@@ -89,6 +108,7 @@ namespace TrafficAssignment {
     int max_iterations_;
     int pas_per_origin_;
     int pas_multiplier_;
+    int rgap_check_interval_;
 
     int number_of_origins_;
 
@@ -427,6 +447,9 @@ namespace TrafficAssignment {
       std::pair <std::vector <int>, std::vector <int>> found_pas;
       bool fl = false;
       while (!fl) {
+        if (q.empty()) {
+          return {{}, {}};
+        }
         now = q.front();
         q.pop();
         if (origin_term_route.count(now)) {
@@ -482,7 +505,10 @@ namespace TrafficAssignment {
     void SingleOriginLinksPasConstruction(int origin_index) {
       for (int link_index = 0; link_index < this->network_.number_of_links(); link_index++) {
         if (LinkPasConstructionCondition(origin_index, link_index)) {
-          OriginLinkPasInitialization(origin_index, OriginLinkPasConstruction(origin_index, link_index));
+          auto pas = OriginLinkPasConstruction(origin_index, link_index);
+          if (!pas.first.empty() && !pas.second.empty()) {
+            OriginLinkPasInitialization(origin_index, pas);
+          }
         }
       }
     }
@@ -770,7 +796,44 @@ namespace TrafficAssignment {
       PasFlowShift(pas_hash, elimination_flag);
       if (DeltaPasQueuePushRequirement(pas_hash)) {
         delta_pas_queue.push({ PasDelta(pas_hash), pas_hash });
+      } else if (elimination_flag && reserved_pas_hash_.count(pas_hash)) {
+        EliminatePas(pas_hash);
       }
+    }
+
+    // Restart bush flows for all origins: replace with AON on current shortest paths.
+    // Maintains flow conservation per origin (unlike MSA blending).
+    void RestartBushFlows() {
+      for (int origin_index = 0; origin_index < this->number_of_origins_; origin_index++) {
+        // Remove old bush flows from network
+        for (int link_id = 0; link_id < this->network_.number_of_links(); link_id++) {
+          if (bush_links_flows_[origin_index][link_id] > 0) {
+            this->network_.SetLinkFlow(link_id, -bush_links_flows_[origin_index][link_id]);
+            bush_links_flows_[origin_index][link_id] = 0;
+          }
+        }
+        // Add new AON flows on current shortest paths
+        auto shortest_routes = this->network_.ComputeSingleOriginBestRoutes(origins_[origin_index]);
+        for (const auto& route : shortest_routes) {
+          T demand = this->network_.od_pairs()[route.first].GetDemand();
+          for (int link_id : route.second) {
+            bush_links_flows_[origin_index][link_id] += demand;
+            this->network_.SetLinkFlow(link_id, demand);
+          }
+        }
+      }
+    }
+
+    void EliminateAllPas() {
+      std::vector<int> all_hashes;
+      for (const auto& [hash, _] : reserved_pas_hash_) {
+        all_hashes.push_back(hash);
+      }
+      for (int hash : all_hashes) {
+        EliminatePas(hash);
+      }
+      pas_flow_shift_starting_point_.clear();
+      DeltaPasQueuePreparation();
     }
 
     void EquilibrationIteration(int iteration_number, bool statistics_recording = false) {

@@ -38,6 +38,7 @@ struct RunConfig {
   long double ema_alpha = 0.0L;        // RouteBased-specific
   int pas_per_origin = 0;              // Tapas-specific
   int pas_multiplier = 0;              // Tapas-specific
+  int rgap_check_interval = 0;         // Tapas-specific (0 = use default)
 
   long double link_capacity_selection_threshold = 1e-3L;
   long double budget_threshold = 1e-1L;
@@ -103,6 +104,10 @@ void ApplyRunOption(RunConfig& config,
   }
   if (key == "pas_multiplier") {
     config.pas_multiplier = ParseNumber<int>(raw_value, key);
+    return;
+  }
+  if (key == "rgap_check_interval") {
+    config.rgap_check_interval = ParseNumber<int>(raw_value, key);
     return;
   }
   if (key == "link_capacity_selection_threshold" || key == "link_threshold") {
@@ -296,6 +301,7 @@ void ApplyEnvironmentOverrides(RunConfig& config) {
   apply_run("CND_EMA_ALPHA", "ema_alpha");
   apply_run("CND_PAS_PER_ORIGIN", "pas_per_origin");
   apply_run("CND_PAS_MULTIPLIER", "pas_multiplier");
+  apply_run("CND_RGAP_CHECK_INTERVAL", "rgap_check_interval");
   apply_run("CND_LINK_THRESHOLD", "link_capacity_selection_threshold");
   apply_run("CND_BUDGET_THRESHOLD", "budget_threshold");
   apply_run("CND_BUDGET_MULTIPLIER", "budget_function_multiplier");
@@ -349,7 +355,8 @@ CreateApproach(const RunConfig& config, TrafficAssignment::Network<long double>&
       config.shift_method,
       config.max_standard_iterations > 0 ? config.max_standard_iterations : 20,
       config.pas_per_origin > 0 ? config.pas_per_origin : 1,
-      config.pas_multiplier > 0 ? config.pas_multiplier : 5
+      config.pas_multiplier > 0 ? config.pas_multiplier : 5,
+      config.rgap_check_interval > 0 ? config.rgap_check_interval : 5
     );
   }
   throw std::runtime_error(
@@ -436,6 +443,8 @@ void PrintEffectiveConfig(const RunConfig& config,
     std::cout << "  pas_per_origin: " << config.pas_per_origin << '\n';
   if (config.pas_multiplier > 0)
     std::cout << "  pas_multiplier: " << config.pas_multiplier << '\n';
+  if (config.rgap_check_interval > 0)
+    std::cout << "  rgap_check_interval: " << config.rgap_check_interval << '\n';
   std::cout << "  budget_upper_bound: " << config.budget_upper_bound << '\n';
   std::cout << "  metrics.output_root: " << config.metrics.output_root << '\n';
   if (!config.metrics.scenario_name.empty()) {

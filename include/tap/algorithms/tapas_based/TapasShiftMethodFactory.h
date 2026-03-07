@@ -13,14 +13,14 @@
 namespace TrafficAssignment {
 
 #define REGISTER_TAPAS_SHIFT_METHOD(name, class_name) \
-  Register(name, [](const std::vector<Link<T>>& links) { \
-    return std::make_unique<class_name<T>>(links); \
+  Register(name, [](const std::vector<Link<T>>& links, T threshold) { \
+    return std::make_unique<class_name<T>>(links, threshold); \
   })
 
 template <typename T>
 class TapasShiftMethodFactory {
 public:
-  using Creator = std::function<std::unique_ptr<TapasShiftMethod<T>>(const std::vector<Link<T>>&)>;
+  using Creator = std::function<std::unique_ptr<TapasShiftMethod<T>>(const std::vector<Link<T>>&, T)>;
 
   TapasShiftMethodFactory(const TapasShiftMethodFactory&) = delete;
   TapasShiftMethodFactory& operator=(const TapasShiftMethodFactory&) = delete;
@@ -39,10 +39,10 @@ public:
     registry_[name] = creator;
   }
     
-  std::unique_ptr<TapasShiftMethod<T>> Create(const std::string& name, const std::vector<Link<T>>& links) {
+  std::unique_ptr<TapasShiftMethod<T>> Create(const std::string& name, const std::vector<Link<T>>& links, T computation_threshold = T(1e-10)) {
     auto it = registry_.find(name);
     if (it != registry_.end()) {
-      return it->second(links);
+      return it->second(links, computation_threshold);
     }
     throw std::runtime_error("Unknown shift method: " + name);
   }

@@ -7,7 +7,8 @@ namespace TrafficAssignment {
   template <typename T>
   class TapasAdvancedGradientDescentShiftMethod : public TapasShiftMethod <T> {
   public:
-    TapasAdvancedGradientDescentShiftMethod(const std::vector <Link <T>>& links) : TapasShiftMethod<T>(links) {}
+    TapasAdvancedGradientDescentShiftMethod(const std::vector <Link <T>>& links, T computation_threshold = T(1e-10))
+      : TapasShiftMethod<T>(links, computation_threshold) {}
 
     ~TapasAdvancedGradientDescentShiftMethod() {}
 
@@ -23,7 +24,7 @@ namespace TrafficAssignment {
       }
       double min_flow = std::min(total_flow.first, total_flow.second);
       double max_flow = std::max(total_flow.first, total_flow.second);
-      if (min_flow < this->computational_threshold_) {
+      if (min_flow < this->computation_threshold_) {
         if (direction) {
           return { -max_flow / 2, max_flow / 2 };
         }

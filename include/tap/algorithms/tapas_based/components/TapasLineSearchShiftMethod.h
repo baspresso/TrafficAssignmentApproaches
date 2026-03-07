@@ -7,7 +7,8 @@ namespace TrafficAssignment {
   template <typename T>
   class TapasLineSearchShiftMethod : public TapasShiftMethod <T> {
   public:
-    TapasLineSearchShiftMethod(const std::vector <Link <T>>& links) : TapasShiftMethod<T>(links) {}
+    TapasLineSearchShiftMethod(const std::vector <Link <T>>& links, T computation_threshold = T(1e-10))
+      : TapasShiftMethod<T>(links, computation_threshold) {}
 
     ~TapasLineSearchShiftMethod() {}
 
@@ -34,6 +35,10 @@ namespace TrafficAssignment {
       }
       while (this->DirectionFlowShiftResult(pas, flow_shift, direction) != direction) {
         flow_shift /= 2;
+        if (flow_shift < this->computation_threshold_) {
+          flow_shift = 0;
+          break;
+        }
       }
       if (direction) {
         return { -flow_shift, flow_shift };

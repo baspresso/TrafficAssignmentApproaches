@@ -14,7 +14,7 @@ cmake --preset mingw-vcpkg-release    # or mingw-vcpkg-debug / mingw-vcpkg-relwi
 cmake --build --preset build-release  # or build-debug / build-relwithdebinfo
 
 # Run (from project root)
-./build/mingw-vcpkg-release/main.exe --config ./configs/cnd.siouxfalls.ini
+c
 ./build/mingw-vcpkg-release/main.exe --help
 ```
 
