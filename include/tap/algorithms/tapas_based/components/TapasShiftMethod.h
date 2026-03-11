@@ -5,6 +5,14 @@
 #include "../../../data/Link.h"
 
 namespace TrafficAssignment {
+  /**
+   * @brief Abstract interface for PAS (Paired Alternative Segment) flow shift methods.
+   *
+   * Computes how much flow to transfer between the two segments of a PAS to reduce
+   * disequilibrium. The shift procedure is described in Bar-Gera (2010) Table 3.
+   *
+   * @tparam T Numeric type for flow computations.
+   */
   template <typename T>
   class TapasShiftMethod {
   public:
@@ -13,6 +21,13 @@ namespace TrafficAssignment {
 
     virtual ~TapasShiftMethod() = default;
 
+    /**
+     * @brief Computes flow shift amounts for both PAS segments.
+     * @param starting_point Initial step size hint (from previous shift on this PAS).
+     * @param pas The paired alternative segment: (segment_1 links, segment_2 links).
+     * @param total_flow Total transferable flow on (segment_1, segment_2).
+     * @return (delta_1, delta_2) where delta_1 + delta_2 = 0 (flow conservation).
+     */
     virtual std::pair <T, T> FlowShift(T starting_point, const std::pair <std::vector <int>, std::vector <int>>& pas, std::pair <T, T> total_flow) = 0;
 
   protected:
@@ -20,6 +35,8 @@ namespace TrafficAssignment {
 
     const T computation_threshold_;
 
+    /// @brief Checks if segment 1 would still be costlier than segment 2 after applying flow_shift.
+    /// @return True if cost(segment_1 + shift_1) > cost(segment_2 + shift_2).
     bool FlowShiftResult(const std::pair <std::vector <int>, std::vector <int>>& pas, const std::pair <T, T>& flow_shift) {
       std::pair <T, T> pas_delay = { 0, 0 };
       for (auto link_index : pas.first) {
@@ -31,6 +48,7 @@ namespace TrafficAssignment {
       return (pas_delay.first > pas_delay.second);
     }
 
+    /// @brief Directional variant of FlowShiftResult: tests shift in the given direction.
     bool DirectionFlowShiftResult(const std::pair <std::vector <int>, std::vector <int>>& pas, const T& flow_shift, const bool direction) {
       if (direction) {
         return FlowShiftResult(pas, { -flow_shift, flow_shift });

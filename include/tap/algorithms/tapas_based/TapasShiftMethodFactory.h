@@ -17,6 +17,12 @@ namespace TrafficAssignment {
     return std::make_unique<class_name<T>>(links, threshold); \
   })
 
+/**
+ * @brief Singleton factory for TAPAS PAS shift methods.
+ *
+ * Registers: "NewtonStep" (TapasNewtonStepShiftMethod), "LineSearch" (TapasLineSearchShiftMethod).
+ * Note: TapasAdvancedGradientDescentShiftMethod is included but not registered.
+ */
 template <typename T>
 class TapasShiftMethodFactory {
 public:

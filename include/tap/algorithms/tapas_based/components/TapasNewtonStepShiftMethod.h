@@ -4,6 +4,16 @@
 #include "TapasShiftMethod.h"
 
 namespace TrafficAssignment {
+  /**
+   * @brief Newton step shift method for PAS-based flow redistribution.
+   *
+   * Computes the shift amount using the first-order Newton approximation:
+   *   delta = |C(s1) - C(s2)| / sum(dc_a/df_a)
+   * where the sum runs over all links in both PAS segments.
+   * Adapts Perederieieva et al. (2015) Eq. 14 from route pairs to PAS segments.
+   *
+   * @tparam T Numeric type for flow computations.
+   */
   template <typename T>
   class TapasNewtonStepShiftMethod : public TapasShiftMethod <T> {
   public:
@@ -12,6 +22,7 @@ namespace TrafficAssignment {
 
     ~TapasNewtonStepShiftMethod() {}
 
+    /// @brief Computes Newton-step PAS flow shift, clamped to available flow.
     std::pair <T, T> FlowShift(T starting_point, const std::pair <std::vector <int>, std::vector <int>>& pas, std::pair <T, T> total_flow) override {
       // Flow is being tranfered from / to the first part of the PAS if direction is true / false
       std::pair <T, T> pas_delay = { 0, 0 };

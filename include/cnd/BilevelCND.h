@@ -24,6 +24,24 @@
 
 namespace TrafficAssignment {
 
+/**
+ * @brief Top-level bilevel Continuous Network Design Problem (CNDP) solver.
+ *
+ * Solves the bilevel optimization problem from Chiou (2005) Eq. 1-2:
+ *
+ * Upper level: min F(y) = TSTT(x(y)) + theta * sum(y_a - lb_a)
+ *              s.t.  lb_a <= y_a <= ub_a   (capacity bounds)
+ *                    theta * sum(y_a - lb_a) <= B   (budget constraint)
+ *
+ * Lower level: x(y) = argmin Beckmann UE objective (user equilibrium traffic assignment)
+ *
+ * The solver uses a configurable pipeline of optimization steps (NLopt, optimality condition,
+ * OptimLib) executed sequentially. Each step operates on the shared CndOptimizationContext
+ * and modifies network link capacities y. After all steps complete, final results are
+ * computed and recorded to trace CSV, metadata JSON, and summary CSV.
+ *
+ * @tparam T Numeric type for flow/capacity computations.
+ */
 template <typename T>
 class BilevelCND {
   using MatrixXd = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
@@ -31,6 +49,20 @@ class BilevelCND {
     boost::multiprecision::cpp_dec_float_50, Eigen::Dynamic, Eigen::Dynamic>;
 
 public:
+  /**
+   * @brief Constructs the bilevel CNDP solver with a pipeline of optimization steps.
+   *
+   * @param network Transportation network (links, nodes, OD pairs).
+   * @param approach Lower-level TAP solver (RouteBased or Tapas).
+   * @param constraints Per-link capacity bounds [lb_a, ub_a] (one per link).
+   * @param step_configs Pipeline step configurations (from [step.N] INI sections).
+   * @param link_capacity_selection_threshold Minimum capacity margin for optimality iterations.
+   * @param budget_threshold Tolerance for budget-at-bound detection.
+   * @param budget_function_multiplier theta: investment cost multiplier. Chiou (2005) Eq. 2.
+   * @param budget_upper_bound B: maximum allowable investment budget.
+   * @param metrics_config Output configuration for traces, metadata, and summary.
+   * @param route_search_thread_count Parallel threads for route enumeration.
+   */
   BilevelCND(
     Network<T>& network,
     std::shared_ptr<TrafficAssignmentApproach<T>> approach,
@@ -84,6 +116,13 @@ public:
     return route_search_thread_count_;
   }
 
+  /**
+   * @brief Main entry point: builds pipeline, creates context, executes, and records results.
+   *
+   * Initializes capacities to lower bounds, runs the optimization pipeline, computes
+   * final TA equilibrium, and outputs optimality condition statistics and solution CSV.
+   * On failure, records partial results before re-throwing.
+   */
   void ComputeNetworkDesign() {
     ApplyApproachRuntimeOptions();
     PrintConfiguration();
@@ -126,18 +165,18 @@ public:
 
 private:
   // --- Core dependencies ---
-  Network<T>& network_;
-  std::shared_ptr<TrafficAssignmentApproach<T>> approach_;
-  std::vector<DirectedLinkCapacityConstraint> constraints_;
+  Network<T>& network_;                        ///< Transportation network with mutable link capacities.
+  std::shared_ptr<TrafficAssignmentApproach<T>> approach_; ///< Lower-level TAP solver.
+  std::vector<DirectedLinkCapacityConstraint> constraints_; ///< Per-link capacity bounds [lb_a, ub_a].
 
   // --- Pipeline config ---
-  std::vector<OptimizationStepConfig> step_configs_;
+  std::vector<OptimizationStepConfig> step_configs_; ///< Ordered step configurations from [step.N] sections.
 
   // --- Shared parameters ---
-  T link_capacity_selection_threshold_;
-  T budget_threshold_;
-  T budget_function_multiplier_;
-  double budget_upper_bound_;
+  T link_capacity_selection_threshold_;        ///< Min capacity margin for optimality condition link selection.
+  T budget_threshold_;                         ///< Tolerance for budget-at-bound detection.
+  T budget_function_multiplier_;               ///< theta: investment cost multiplier. Chiou (2005) Eq. 2.
+  double budget_upper_bound_;                  ///< B: maximum allowable investment budget.
   bool verbose_;
 
   // --- Statistics ---
@@ -187,12 +226,14 @@ private:
     std::cout << "  Route search threads: " << route_search_thread_count_ << std::endl;
   }
 
+  /// @brief Sets all link capacities to their lower bounds (starting point for optimization).
   void InitializeCapacities() {
     for (std::size_t i = 0; i < constraints_.size(); ++i) {
       network_.mutable_links()[i].capacity = constraints_[i].lower_bound;
     }
   }
 
+  /// @brief Runs final TA solve, logs results, writes summary and solution CSV.
   void ComputeFinalResults(
       std::chrono::steady_clock::time_point optimization_start_time,
       typename CndOptimizationContext<T>::RuntimeCounters& counters) {
@@ -249,6 +290,7 @@ private:
       true
     );
 
+    statistics_recorder_.WriteSolutionCSV(constraints_);
     RecordStatistics(ctx);
   }
 
@@ -352,6 +394,14 @@ private:
     writeVectorsToCSV(vectors, headers);
   }
 
+  /**
+   * @brief Computes the optimality function phi_a for every link (post-optimization diagnostic).
+   *
+   * At a first-order optimal solution, phi_a should be equal across all active design links.
+   * The spread of phi values indicates solution quality. Chiou (2005) Eq. 9.
+   *
+   * @return Vector of phi_a values, one per link.
+   */
   std::vector<T> OptimalityCondition(CndOptimizationContext<T>& ctx) {
     const int n_links = network_.number_of_links();
     std::vector<T> link_condition_result(n_links, T(0));
@@ -447,9 +497,12 @@ private:
 
   void writeVectorsToCSV(const std::vector<std::vector<T>>& vectors,
                          const std::vector<std::string>& headers) {
-    std::filesystem::path current_path = "C:/Projects/TrafficAssignmentApproaches";
-    auto file_path = current_path / "data" / "TransportationNetworks" / network_.name() /
-                     (network_.name() + "_optimality.csv");
+    auto output_dir = statistics_recorder_.output_dir();
+    if (output_dir.empty()) {
+      output_dir = std::filesystem::current_path() / "performance_results" / network_.name();
+    }
+    std::filesystem::create_directories(output_dir);
+    auto file_path = output_dir / (network_.name() + "_optimality.csv");
     std::ofstream file(file_path);
     for (size_t i = 0; i < headers.size(); ++i) {
       file << headers[i];

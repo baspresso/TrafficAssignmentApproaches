@@ -12,6 +12,20 @@
 #include <random>
 
 namespace TrafficAssignment {
+  /**
+   * @brief Path-based (column generation) framework for traffic assignment.
+   *
+   * Implements the iterative path-based algorithm from Perederieieva et al. (2015) Fig. 2:
+   * 1. All-or-nothing (AON) initialization: assign all demand to shortest paths
+   * 2. Column generation: add new shortest paths to route sets (parallel Dijkstra)
+   * 3. Equilibration: redistribute flows using a shift method (e.g., Newton step)
+   * 4. Repeat until convergence (max iterations reached)
+   *
+   * Supports parallel route search via configurable thread count.
+   * OD pairs are processed in EMA-priority order (most-improving pairs first).
+   *
+   * @tparam T Numeric type for flow computations.
+   */
   template <typename T>
   class RouteBasedApproach : public TrafficAssignmentApproach <T> {
   public:
@@ -45,7 +59,8 @@ namespace TrafficAssignment {
       return route_search_thread_count_;
     }
 
-    void ComputeTrafficFlows(bool statistics_recording = false) override { 
+    /// @brief Main loop: AON init -> (column generation + equilibration) x max_iterations.
+    void ComputeTrafficFlows(bool statistics_recording = false) override {
       if (statistics_recording) {
         this->statistics_recorder_.StartRecording(this->GetApproachName());
       }
@@ -68,10 +83,10 @@ namespace TrafficAssignment {
     }
 
   protected:
-    int max_iterations_;
-    int full_iteration_count_;
-    int origin_iteration_count_;
-    T ema_alpha_;
+    int max_iterations_;           ///< Maximum outer iterations (column generation rounds).
+    int full_iteration_count_;     ///< Number of full equilibration sweeps per iteration.
+    int origin_iteration_count_;   ///< Flow shift passes per origin during column generation.
+    T ema_alpha_;                  ///< EMA smoothing factor for OD pair priority ordering.
     static constexpr int min_parallel_links_count_ = 200;
     static constexpr std::size_t min_parallel_tasks_total_ = 32;
     std::unique_ptr <RouteBasedShiftMethod <T>> shift_method_;
@@ -93,6 +108,7 @@ namespace TrafficAssignment {
         }
     }
 
+    /// @brief All-or-nothing (AON) initialization: assigns full demand to shortest paths.
     void InitializeRoutes() {
         UpdateOriginsRoutesBatch(0, active_origins_.size());
     }
@@ -105,6 +121,7 @@ namespace TrafficAssignment {
         );
     }
 
+    /// @brief Column generation: Dijkstra shortest path search per origin (optionally parallel).
     void ProcessOrigins() {
         if (active_origins_.empty()) {
             return;
@@ -149,6 +166,7 @@ namespace TrafficAssignment {
         return thread_count;
     }
 
+    /// @brief Parallel batch route search: Dijkstra per origin, then sequential route addition.
     void UpdateOriginsRoutesBatch(std::size_t begin, std::size_t end) {
         if (begin >= end) {
             return;
@@ -208,6 +226,7 @@ namespace TrafficAssignment {
         }
     }
 
+    /// @brief EMA-prioritized equilibration: sorts OD pairs by expected improvement, then shifts flows.
     void ProcessODPairs(bool statistics_recording) {
         auto od_queue = PrepareODQueue();
         if (od_queue.empty()) return;
@@ -242,6 +261,7 @@ namespace TrafficAssignment {
     }
 
 
+    /// @brief Applies the shift method to one OD pair and tracks objective improvement.
     void ExecuteFlowShift(int od_index) {
         auto& od_pair = this->network().mutable_od_pairs()[od_index];
         const auto routes = od_pair.GetRoutes();
@@ -268,6 +288,7 @@ namespace TrafficAssignment {
       return shift_method_->FlowShift(od_pair_index);
     }
 
+    /// @brief Computes partial Beckmann objective over links used by the given routes.
     T CalculateRoutesObjective(const std::vector<std::vector<int>>& routes) {
         T total = 0;
         std::unordered_set<int> unique_links;

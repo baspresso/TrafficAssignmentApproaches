@@ -7,12 +7,23 @@
 #include <thread>
 
 namespace TrafficAssignment {
+  /**
+   * @brief Newton step shift method for path-based traffic assignment.
+   *
+   * Shifts flow from the most expensive route to the cheapest using:
+   *   delta_F = (C_max - C_min) / sum_{A'} (dc_a/df_a)
+   * where A' is the set of non-intersecting links between the two routes.
+   * See Perederieieva et al. (2015) Eq. 14, Section 4.4.3.
+   *
+   * @tparam T Numeric type for flow computations.
+   */
   template <typename T>
-  class RouteBasedNewtonStepShiftMethod : public RouteBasedShiftMethod <T> {    
+  class RouteBasedNewtonStepShiftMethod : public RouteBasedShiftMethod <T> {
   public:
     explicit RouteBasedNewtonStepShiftMethod(Network<T>& network)
         : RouteBasedShiftMethod<T>(network) {}
 
+    /// @brief Computes Newton-step flow shift between min-cost and max-cost routes.
     std::vector <T> FlowShift(int od_index) {
       auto& od_pair = this->od_pairs()[od_index];
       const int routes_count = od_pair.GetRoutesCount();
@@ -30,6 +41,7 @@ namespace TrafficAssignment {
     }
   private:
     const T computational_threshold_ = 1e-10;
+    /// @brief Finds the cheapest and most expensive routes and their cost difference.
     std::tuple <T, int, int> MinMaxRoutes(const OriginDestinationPair <T>& od_pair) {
         std::vector <std::vector <int>> routes = od_pair.GetRoutes();
         const int routes_count = od_pair.GetRoutesCount();
@@ -50,9 +62,11 @@ namespace TrafficAssignment {
         return {max_delay - min_delay, min_index, max_index};
     }
 
-    std::tuple<std::vector<int>, std::vector<int>> 
+    /// @brief Extracts links unique to each of the min/max routes (excluding shared links).
+    /// Shared links cancel out in the Newton step since their derivatives appear in both.
+    std::tuple<std::vector<int>, std::vector<int>>
     MinMaxRoutesNonIntersectingLinks(const OriginDestinationPair<T>& od_pair,
-                                     int min_index, 
+                                     int min_index,
                                      int max_index) {
       std::vector <std::vector <int>> routes = od_pair.GetRoutes();
       std::vector <int> min_route = routes[min_index];
@@ -78,6 +92,12 @@ namespace TrafficAssignment {
       return {min_route_non_intersecting, max_route_non_intersecting};
     }
 
+    /**
+     * @brief Computes the Newton step size: delta = |C_s - C_l| / sum(dc_a/df_a).
+     *
+     * The denominator sums first derivatives over non-intersecting links of both routes.
+     * See Perederieieva et al. (2015) Eq. 14.
+     */
     T FlowAmount(std::vector <int> min_route_non_intersecting, std::vector <int> max_route_non_intersecting) {
       std::pair <T, T> routes_delays = { 0, 0 };
       T sum_routes_delays_der = 0;

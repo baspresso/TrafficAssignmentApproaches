@@ -7,14 +7,25 @@
 
 
 namespace TrafficAssignment {
+  /**
+   * @brief Jacobian-based shift method from Krylatov (2023).
+   *
+   * Computes flow updates using matrix inversion of the route cost Jacobian:
+   *   delta_F = -J^{-1} * (C - e * C_target)
+   * where J(i,j) = sum of dc_a/df_a over shared links, C is the route cost vector,
+   * e is the all-ones vector, and C_target is a target equilibrium cost.
+   *
+   * @tparam T Numeric type for flow computations.
+   */
   template <typename T>
   class RouteBasedKrylatov2023ShiftMethod : public RouteBasedShiftMethod <T> {
     using MatrixXd = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
-    
+
   public:
     explicit RouteBasedKrylatov2023ShiftMethod(Network<T>& network)
         : RouteBasedShiftMethod<T>(network) {}
 
+    /// @brief Computes Jacobian-based flow update for the given OD pair.
     std::vector <T> FlowShift(int od_index) {
       auto& od_pair = this->od_pairs()[od_index];
       const int routes_count = od_pair.GetRoutesCount();
@@ -25,6 +36,7 @@ namespace TrafficAssignment {
 
   private:
 
+    /// @brief Computes delta_F = -J^{-1} * (C - e * C_target).
     MatrixXd CalculateFlowDelta(int od_index) {
         MatrixXd J = RoutesJacobiMatrix(od_index);
         MatrixXd delays = RoutesDelayColumn(od_index);
@@ -86,6 +98,8 @@ namespace TrafficAssignment {
       return MatrixXd::Constant(size, 1, 1.0);
     }    
 
+    /// @brief Computes the target equilibrium cost. Uses constant-route delay if available,
+    /// otherwise falls back to a weighted average: C_target = (e^T J^{-1} C) / (e^T J^{-1} e).
     T TargetDelay(int od_index) {
         if(HasConstantRoute(od_index)) {
             return ConstantRouteDelay(od_index);
@@ -114,6 +128,7 @@ namespace TrafficAssignment {
         return T(0);
     }
 
+    /// @brief Weighted average target cost: C_target = (e^T J^{-1} C) / (e^T J^{-1} e).
     T WeightedAverageDelay(int od_index) {
         MatrixXd J_inv = RoutesJacobiMatrix(od_index).inverse();
         MatrixXd e = EColumn(od_index);

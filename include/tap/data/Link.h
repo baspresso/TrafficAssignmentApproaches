@@ -10,8 +10,14 @@
 namespace TrafficAssignment {
 
   /**
-   * Represents a directed link in a transportation network using the BPR delay function.
-   * @tparam T Data type for flow/capacity (e.g., double).
+   * Represents a directed link in a transportation network using the Bureau of Public Roads
+   * (BPR) delay function: t_a(f) = t0 * (1 + b * (f/c)^p).
+   *
+   * The BPR function models congestion-dependent travel time on a link. As flow f approaches
+   * or exceeds capacity c, travel time increases polynomially. This is the standard link
+   * performance function used in traffic assignment. See Perederieieva et al. (2015) Section 2.
+   *
+   * @tparam T Data type for flow/capacity (e.g., double, long double).
    */
   template <class T>
   struct Link {
@@ -23,15 +29,15 @@ namespace TrafficAssignment {
     const int type;           ///< Link type/category (e.g., highway, arterial).
 
     // BPR function parameters
-    T capacity;        
+    T capacity;               ///< Link capacity c_a (vehicles/hour). Denominator in BPR ratio f/c.
     const T length;           ///< Physical length of the link (km/miles).
     const T free_flow_time;   ///< Travel time under free-flow conditions (minutes).
     const T b;                ///< BPR scaling factor (typical value: 0.15).
     const T power;            ///< BPR exponent (typical value: 4).
     const T speed;            ///< Speed limit (km/h or mph).
     const T toll;             ///< Toll cost for using the link (monetary units).
-    const int power_int_;
-    const bool is_integer_power_;
+    const int power_int_;            ///< Integer cast of power for fast exponentiation via IntPow().
+    const bool is_integer_power_;    ///< True if power is exactly integer; enables IntPow() optimization.
 
     T flow = 0; ///< Current traffic flow on the link (vehicles/hour).
 
@@ -58,6 +64,7 @@ namespace TrafficAssignment {
     /// @brief Default destructor (no dynamic memory to manage).
     ~Link() = default;
 
+    /// @brief Fast integer exponentiation via binary exponentiation (squaring). O(log exp).
     static T IntPow(T base, int exp) {
       if (exp < 0) return T(1) / IntPow(base, -exp);
       T result = 1;
@@ -70,9 +77,15 @@ namespace TrafficAssignment {
     }
 
     /**
-     * @brief Computes travel time using the BPR delay function.
-     * @param temp_flow Flow value to compute delay for. Defaults to current flow.
-     * @return Travel time (delay).
+     * @brief Computes link travel time c_a(f_a) using the BPR delay function.
+     *
+     * Formula: t_a(f) = t0 * (1 + b * (f/c)^p)
+     *
+     * This is the link cost function used throughout traffic assignment.
+     * See Perederieieva et al. (2015) Section 2.
+     *
+     * @param temp_flow Flow value to compute delay for. Defaults to current link flow.
+     * @return Travel time on the link (minutes).
      */
     T Delay(T temp_flow = -1) const {
       if (temp_flow == -1) {
@@ -90,9 +103,16 @@ namespace TrafficAssignment {
     }
 
     /**
-     * @brief Computes the integral of the BPR delay function (used in objective functions).
-     * @param temp_flow Upper limit of integration. Defaults to current flow.
-     * @return Integral value (unit: vehicle-minutes).
+     * @brief Computes the Beckmann objective integrand: integral_0^f t_a(x) dx.
+     *
+     * Formula: t0 * (f + b * c * (f/c)^(p+1) / (p+1))
+     *
+     * This is the per-link contribution to the Beckmann objective function T(f).
+     * The user equilibrium is the solution to min T(f) = sum_a integral_0^{f_a} t_a(x) dx.
+     * See Bar-Gera (2010) Eq. 1, Perederieieva et al. (2015) Eq. 2.
+     *
+     * @param temp_flow Upper limit of integration. Defaults to current link flow.
+     * @return Integral value (vehicle-minutes).
      */
     T DelayInteg(T temp_flow = -1) const {
       if (temp_flow == -1) {
@@ -110,8 +130,14 @@ namespace TrafficAssignment {
     }
 
     /**
-     * @brief Computes the first derivative of the BPR delay function (used in gradient calculations).
-     * @param temp_flow Flow value to evaluate at. Defaults to current flow.
+     * @brief Computes dc_a/df_a, the first derivative of the BPR delay function.
+     *
+     * Formula: t0 * b * p * (f/c)^(p-1) / c
+     *
+     * Used as the denominator in the Newton step for flow shifting:
+     * delta_F = (C_max - C_min) / sum(dc_a/df_a). See Perederieieva et al. (2015) Eq. 14.
+     *
+     * @param temp_flow Flow value to evaluate at. Defaults to current link flow.
      * @return Rate of change of delay with respect to flow (minutes/vehicle).
      */
     T DelayDer(T temp_flow = -1) const {
@@ -130,9 +156,14 @@ namespace TrafficAssignment {
     }
 
     /**
-     * @brief Computes the second derivative of the BPR delay function (used in Hessian calculations).
-     * @param temp_flow Flow value to evaluate at. Defaults to current flow.
-     * @return Second derivative of delay (minutes/vehicle²).
+     * @brief Computes d^2 c_a / df_a^2, the second derivative of the BPR delay function.
+     *
+     * Formula: t0 * b * p * (p-1) * (f/c)^(p-2) / c^2
+     *
+     * Used in second-order methods (e.g., TapasAdvancedGradientDescentShiftMethod).
+     *
+     * @param temp_flow Flow value to evaluate at. Defaults to current link flow.
+     * @return Second derivative of delay (minutes/vehicle^2).
      */
     T DelaySecondDer(T temp_flow = -1) const {
       if (temp_flow == -1) {
@@ -191,6 +222,17 @@ namespace TrafficAssignment {
       return ans;
     }
     
+    /**
+     * @brief Computes dt_a/dc_a, the partial derivative of delay with respect to capacity.
+     *
+     * Formula: -p * b * t0 * (f/c)^p / c
+     *
+     * Used in bilevel CNDP optimization to evaluate sensitivity of travel time to
+     * capacity changes (gradient of the lower-level objective w.r.t. design variables).
+     *
+     * @param temp_flow Flow value to evaluate at. Defaults to current link flow.
+     * @return Partial derivative of delay w.r.t. capacity (negative: more capacity = less delay).
+     */
     T DelayCapacityDer(T temp_flow = -1) const {
       if (temp_flow == -1) {
         temp_flow = flow;
@@ -223,6 +265,12 @@ namespace TrafficAssignment {
     }
   };
 
+  /**
+   * @brief Computes element J(i,j) of the route cost Jacobian matrix.
+   *
+   * J(i,j) = sum of dc_a/df_a over links shared by routes i and j.
+   * Used in the Krylatov (2023) shift method for Jacobian-based flow updates.
+   */
   template <typename T>
   T CalculateJacobiElement(const std::vector<int>& route_i,
                            const std::vector<int>& route_j,
@@ -238,6 +286,13 @@ namespace TrafficAssignment {
     return sum;
   }
 
+  /**
+   * @brief Builds the full route cost Jacobian matrix J for a set of routes.
+   *
+   * J(i,j) = sum_{a in route_i intersect route_j} dc_a/df_a.
+   * The matrix is symmetric since shared links contribute equally in both directions.
+   * Used by the Krylatov (2023) method: delta_F = -J^{-1} * (C - e * C_target).
+   */
   template <typename T>
   Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> RoutesJacobiMatrix(const std::vector<std::vector <int>>& routes, const std::vector <Link<T>>& links) {
     const size_t R = routes.size();

@@ -14,6 +14,21 @@ namespace TrafficAssignment {
 // Forward declaration for ParseNloptAlgorithm — defined at bottom of file
 inline nlopt::algorithm ParseNloptAlgorithmForStep(const std::string& value);
 
+/**
+ * @brief Derivative-free optimization step using the NLopt library.
+ *
+ * Supports local algorithms (COBYLA, BOBYQA, Nelder-Mead, SBPLX, PRAXIS) and global
+ * algorithms (ISRES, AGS, ESCH, CRS2) with optional composite configurations (AUGLAG).
+ *
+ * When the selected algorithm supports nonlinear inequality constraints
+ * (SupportsHardBudgetConstraint() == true), the budget constraint
+ *   theta * sum(y_a - lb_a) - B <= 0    (Chiou 2005, Eq. 2)
+ * is enforced as a hard NLopt constraint. Otherwise, a soft quadratic penalty
+ *   lambda * max(0, Budget - B)^2
+ * is added to the objective.
+ *
+ * @tparam T Numeric type for flow/capacity computations.
+ */
 template <typename T>
 class NloptOptimizationStep : public OptimizationStep<T> {
 public:
@@ -26,6 +41,7 @@ public:
     return "nlopt(" + config_.algorithm + ")";
   }
 
+  /// @brief Configures NLopt optimizer, sets bounds and constraints, and runs optimization.
   StepResult Execute(CndOptimizationContext<T>& ctx) override {
     StepResult result;
     if (config_.max_iterations == 0) {
@@ -142,11 +158,19 @@ private:
   int eval_count_ = 0;
   bool hard_budget_enabled_ = false;
 
+  /// @brief Static NLopt callback adapting to member ObjectiveFunction.
   static double ObjectiveWrapper(unsigned n, const double* x, double* grad, void* data) {
     auto* self = static_cast<NloptOptimizationStep<T>*>(data);
     return self->ObjectiveFunction(n, x, grad);
   }
 
+  /**
+   * @brief Evaluates the upper-level objective F(y) = TSTT(x(y)) + theta * BudgetCost(y).
+   *
+   * Sets link capacities from x, solves lower-level TAP, computes TSTT and budget cost.
+   * Adds soft quadratic budget penalty when hard constraint is not enabled.
+   * Returns kInvalidObjectivePenalty if the TA solver produces non-finite results.
+   */
   double ObjectiveFunction(unsigned n, const double* x, double* grad) {
     (void)grad;
     auto& ctx = *ctx_;
@@ -212,11 +236,17 @@ private:
     return objective_function;
   }
 
+  /// @brief Static NLopt callback for the budget inequality constraint.
   static double BudgetConstraintWrapper(unsigned n, const double* x, double* grad, void* data) {
     auto* self = static_cast<NloptOptimizationStep<T>*>(data);
     return self->BudgetConstraint(n, x, grad);
   }
 
+  /**
+   * @brief Hard budget inequality: theta * sum(y_a - lb_a) - B <= 0. Chiou (2005) Eq. 2.
+   *
+   * Gradient is constant: grad[i] = theta (budget_function_multiplier).
+   */
   double BudgetConstraint(unsigned n, const double* x, double* grad) {
     auto& ctx = *ctx_;
     if (grad) {
@@ -229,6 +259,7 @@ private:
   }
 };
 
+/// @brief Parses a string algorithm name (e.g., "LN_COBYLA") to an nlopt::algorithm enum.
 inline nlopt::algorithm ParseNloptAlgorithmForStep(const std::string& raw_value) {
   // Convert to uppercase for comparison
   std::string value = raw_value;

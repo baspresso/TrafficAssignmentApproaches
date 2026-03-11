@@ -18,22 +18,40 @@
 
 namespace TrafficAssignment {
 
+/**
+ * @brief Shared evaluation context for bilevel CNDP optimization steps.
+ *
+ * Holds references to the network, TAP solver, and capacity constraints, plus shared
+ * parameters (budget multiplier, bounds) and runtime counters. All optimization steps
+ * operate through this context to evaluate the upper-level objective:
+ *
+ *   F(y) = TSTT(x(y)) + theta * sum(y_a - lb_a)
+ *
+ * where x(y) is the user-equilibrium flow for capacity vector y, and theta is the
+ * budget function multiplier. Chiou (2005) Eq. 1.
+ *
+ * Provides crash recovery for TAP solver failures (retry with reset) and
+ * budget feasibility enforcement via proportional projection.
+ *
+ * @tparam T Numeric type for flow/capacity computations.
+ */
 template <typename T>
 class CndOptimizationContext {
 public:
   // --- Named constants ---
-  static constexpr double kDenominatorZeroGuard    = 1e-40;
-  static constexpr double kNegativeFlowTolerance   = -1e-8;
-  static constexpr double kCapacityBoundTolerance   = 1e-5;
-  static constexpr double kFlowSignificanceThreshold = 1e-3;
-  static constexpr double kInitialTransferAmount    = 1.0;
+  static constexpr double kDenominatorZeroGuard    = 1e-40;  ///< Guard against division by zero in Jacobian computations.
+  static constexpr double kNegativeFlowTolerance   = -1e-8;  ///< Tolerance for detecting invalid negative flows.
+  static constexpr double kCapacityBoundTolerance   = 1e-5;  ///< Tolerance for capacity-at-bound checks.
+  static constexpr double kFlowSignificanceThreshold = 1e-3; ///< Minimum flow for a link to be considered active.
+  static constexpr double kInitialTransferAmount    = 1.0;   ///< Starting capacity transfer in optimality iterations.
   static constexpr int    kProgressBarWidth         = 30;
-  static constexpr int    kMaxInvalidStateWarnings  = 10;
-  static constexpr double kBinarySearchDivisor      = 2.0;
-  static constexpr double kInvalidObjectivePenalty   = 1e30;
-  static constexpr double kDefaultBudgetViolationPenaltyFactor = 100.0;
-  static constexpr double kConstraintTolerance      = 1e-4;
+  static constexpr int    kMaxInvalidStateWarnings  = 10;    ///< Maximum invalid-state warnings before suppression.
+  static constexpr double kBinarySearchDivisor      = 2.0;   ///< Halving factor for transfer validation retries.
+  static constexpr double kInvalidObjectivePenalty   = 1e30;  ///< Penalty returned when objective is non-finite.
+  static constexpr double kDefaultBudgetViolationPenaltyFactor = 100.0; ///< Quadratic penalty coefficient for soft budget constraint.
+  static constexpr double kConstraintTolerance      = 1e-4;  ///< NLopt constraint feasibility tolerance.
 
+  /// @brief Console progress bar state for long-running optimization loops.
   struct ProgressState {
     int count = 0;
     int total = 0;
@@ -56,37 +74,41 @@ public:
     void Advance() { ++count; }
   };
 
+  /**
+   * @brief Mutable counters tracking iteration counts, TA solver timing, and crash recovery
+   *        across all pipeline steps. Persists for the lifetime of one ComputeNetworkDesign() call.
+   */
   struct RuntimeCounters {
-    int standard_trace_step = 0;
-    int optcond_trace_step = 0;
-    int total_ta_run_count = 0;
-    double ta_compute_time_sum_seconds = 0.0;
-    double ta_compute_time_max_seconds = 0.0;
-    double max_budget_violation = 0.0;
-    int invalid_ta_state_count = 0;
-    int ta_recovery_success_count = 0;
-    int ta_recovery_failure_count = 0;
-    int invalid_value_log_count = 0;
+    int standard_trace_step = 0;           ///< Cumulative evaluation count for standard (NLopt/OptimLib) steps.
+    int optcond_trace_step = 0;            ///< Cumulative iteration count for optimality condition steps.
+    int total_ta_run_count = 0;            ///< Total number of lower-level TAP solver invocations.
+    double ta_compute_time_sum_seconds = 0.0; ///< Cumulative TA solver wall-clock time.
+    double ta_compute_time_max_seconds = 0.0; ///< Maximum single TA solver invocation time.
+    double max_budget_violation = 0.0;     ///< Worst observed budget violation max(0, B(y) - B_max).
+    int invalid_ta_state_count = 0;        ///< Number of TA solver runs producing invalid state.
+    int ta_recovery_success_count = 0;     ///< Successful recoveries via reset+retry.
+    int ta_recovery_failure_count = 0;     ///< Failed recoveries (penalty objective returned).
+    int invalid_value_log_count = 0;       ///< Warning counter for suppression after kMaxInvalidStateWarnings.
 
     void Reset() { *this = RuntimeCounters{}; }
   };
 
-  // References (non-owning)
-  Network<T>& network;
-  std::shared_ptr<TrafficAssignmentApproach<T>> approach;
-  const std::vector<DirectedLinkCapacityConstraint>& constraints;
+  // --- Non-owning references ---
+  Network<T>& network;                        ///< Transportation network with mutable link capacities and flows.
+  std::shared_ptr<TrafficAssignmentApproach<T>> approach; ///< Lower-level TAP solver (Beckmann UE).
+  const std::vector<DirectedLinkCapacityConstraint>& constraints; ///< Per-link capacity bounds [lb_a, ub_a].
 
-  // Shared parameters
-  T budget_function_multiplier;
-  double budget_upper_bound;
-  T budget_threshold;
-  T link_capacity_selection_threshold;
-  std::size_t route_search_thread_count;
-  bool verbose;
+  // --- Shared parameters ---
+  T budget_function_multiplier;               ///< theta: multiplier in budget cost theta * sum(y_a - lb_a). Chiou (2005) Eq. 2.
+  double budget_upper_bound;                  ///< B: maximum allowable investment budget.
+  T budget_threshold;                         ///< Tolerance for budget-at-bound detection in optimality iterations.
+  T link_capacity_selection_threshold;        ///< Minimum distance from bounds to consider a link for capacity transfer.
+  std::size_t route_search_thread_count;      ///< Parallel thread count for route enumeration in RouteBased approach.
+  bool verbose;                               ///< Enable console output (progress bars, warnings).
 
-  // Mutable state
-  RuntimeCounters& counters;
-  CndStatisticsRecorder<T>& statistics_recorder;
+  // --- Mutable state ---
+  RuntimeCounters& counters;                  ///< Shared counters across all pipeline steps.
+  CndStatisticsRecorder<T>& statistics_recorder; ///< Convergence trace and summary recorder.
 
   CndOptimizationContext(
     Network<T>& network_ref,
@@ -115,6 +137,7 @@ public:
 
   // --- Utility methods ---
 
+  /// @brief Checks if a double value is finite (not NaN or infinity).
   static bool IsFiniteNumber(double value) {
     return std::isfinite(value);
   }
@@ -127,6 +150,8 @@ public:
     return static_cast<T>(std::numeric_limits<double>::quiet_NaN());
   }
 
+  /// @brief Computes investment cost from current network capacities: theta * sum(y_a - lb_a).
+  ///        Chiou (2005) Eq. 2.
   T Budget() {
     T result = 0;
     for (int link_index = 0; link_index < network.number_of_links(); link_index++) {
@@ -135,6 +160,7 @@ public:
     return result * budget_function_multiplier;
   }
 
+  /// @brief Computes investment cost from explicit capacity vector x (NLopt callback interface).
   double BudgetFunction(int n, const double* x) {
     double result = 0;
     for (int i = 0; i < n; i++) {
@@ -143,6 +169,7 @@ public:
     return result * budget_function_multiplier;
   }
 
+  /// @brief Checks if any link has non-finite flow/capacity/delay or negative values.
   bool HasInvalidLinkState() const {
     for (const auto& link : network.links()) {
       const double flow = static_cast<double>(link.flow);
@@ -179,6 +206,17 @@ public:
               << std::endl;
   }
 
+  /**
+   * @brief Solves the lower-level TAP (Beckmann user equilibrium) with crash recovery.
+   *
+   * On first failure (NaN/inf flows), resets the solver state and retries once.
+   * Updates ta_compute_seconds with the wall-clock time spent in the TA solver.
+   *
+   * @param ta_compute_seconds Output: cumulative TA solver time for this call.
+   * @param context Label for warning messages (e.g., "standard_eval", "optcond_iter").
+   * @param force_reset_before_first_attempt If true, resets solver state before the first attempt.
+   * @return true if valid equilibrium flows were obtained.
+   */
   bool ComputeTrafficFlowsSafely(double& ta_compute_seconds,
                                  const std::string& context,
                                  bool force_reset_before_first_attempt = false) {
@@ -210,6 +248,13 @@ public:
     return false;
   }
 
+  /**
+   * @brief Projects capacity vector onto the budget constraint set.
+   *
+   * If budget B(x) > B_max, proportionally reduces all capacity increments (x_a - lb_a)
+   * to bring total investment within budget. Uses two passes: proportional scaling,
+   * then greedy sweep for any residual excess.
+   */
   void EnforceBudgetFeasibility(std::vector<double>& x,
                                 const std::vector<double>& lower_bounds) {
     const int n = static_cast<int>(x.size());
@@ -246,6 +291,7 @@ public:
     }
   }
 
+  /// @brief Updates shared runtime counters with TA timing and budget violation metrics.
   void UpdateRuntimeAndBudgetMetrics(double ta_compute_seconds, double budget) {
     ++counters.total_ta_run_count;
     counters.ta_compute_time_sum_seconds += ta_compute_seconds;
@@ -256,6 +302,7 @@ public:
     );
   }
 
+  /// @brief Records an objective evaluation to the convergence trace (delegates to CndStatisticsRecorder).
   void LogQualityTimePoint(const std::string& phase,
                            int step,
                            double objective,
@@ -365,8 +412,9 @@ public:
     std::cout << line.str() << std::flush;
   }
 
-  // --- Algorithm name helper ---
+  // --- NLopt algorithm metadata ---
 
+  /// @brief Returns a human-readable name for the given NLopt algorithm enum.
   static std::string GetAlgorithmName(nlopt::algorithm algo) {
     switch (algo) {
       case nlopt::LD_SLSQP:
@@ -384,6 +432,8 @@ public:
     }
   }
 
+  /// @brief Returns true if the NLopt algorithm supports nonlinear inequality constraints.
+  ///        Used to choose between hard budget constraint and soft penalty fallback.
   static bool SupportsHardBudgetConstraint(nlopt::algorithm algorithm) {
     switch (algorithm) {
       case nlopt::LN_COBYLA:

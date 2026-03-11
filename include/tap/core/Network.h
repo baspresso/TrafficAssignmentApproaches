@@ -54,16 +54,10 @@ public:
     
     std::string name() const noexcept { return name_; }
 
-    /**
-     * @brief Returns total number of nodes in the network.
-     * @return Number of nodes as integer.
-     */
+    /// @brief Returns total number of links in the network.
     int number_of_links() const noexcept { return links_.size(); }
 
-    /**
-     * @brief Returns current number of links in the network.
-     * @return Number of links as integer.
-     */
+    /// @brief Returns current number of origin-destination pairs.
     int number_of_od_pairs() const noexcept { return origin_destination_pairs_.size(); }
 
     /**
@@ -128,10 +122,18 @@ public:
     // ---------------------------
     
     /**
-     * @brief Computes shortest paths from a single origin to all destinations.
+     * @brief Computes shortest paths from a single origin to all its destinations (Dijkstra).
+     *
+     * Used for two purposes:
+     * 1. Column generation in path-based methods: finds new shortest paths to add to the
+     *    route set. See Perederieieva et al. (2015) Fig. 2.
+     * 2. TAPAS least-cost tree construction: builds the shortest path tree for PAS
+     *    discovery. See Bar-Gera (2010) Section 5.
+     * 3. RGAP computation: provides the shortest path costs for the numerator of
+     *    RGAP = 1 - sum(D_p * C_min^p) / sum(f_a * c_a). See Perederieieva et al. (2015) Eq. 3.
+     *
      * @param origin Node ID of the starting zone.
-     * @return Vector of pairs containing OD pair index and corresponding shortest path.
-     * @note Uses Dijkstra's algorithm with priority queue implementation.
+     * @return Vector of (OD pair index, shortest path as link IDs).
      */
     std::vector<std::pair<int, std::vector<int>>> ComputeSingleOriginBestRoutes(int origin) const {
         std::priority_queue <std::pair <T, int>, std::vector <std::pair <T, int>>, std::greater <std::pair <T, int>>> q;
@@ -177,17 +179,24 @@ public:
         return best_routes;
     }
 
+    /// @brief Adds routes to their respective OD pairs (batch column generation).
     void AddRoutes(const std::vector <std::pair <int, std::vector <int>>>& routes) {
       for (auto now : routes) {
         origin_destination_pairs_[now.first].AddNewRoute(now.second);
       }
     }
 
-    // Single-link update
+    /// @brief Adjusts aggregate flow on a single link by delta (additive update).
     void SetLinkFlow(int link_id, T delta) {
         links_[link_id].flow += delta;
     }
 
+    /**
+     * @brief Computes the Beckmann objective: T(f) = sum_a integral_0^{f_a} t_a(x) dx.
+     *
+     * The user equilibrium is the minimizer of this convex objective under flow
+     * conservation constraints. See Bar-Gera (2010) Eq. 1, Perederieieva et al. (2015) Eq. 2.
+     */
     T ObjectiveFunction() const {
       T total = 0;
       for (const auto& link : links_) {
@@ -196,6 +205,12 @@ public:
       return total;
     }
 
+    /**
+     * @brief Computes total system travel time: TSTT = sum_a f_a * c_a(f_a).
+     *
+     * Unlike the Beckmann objective (which uses integrals), this is the actual total
+     * travel time experienced by all users. Used as the upper-level objective in bilevel CNDP.
+     */
     T TotalTravelTime() const {
       T total_travel_time = 0;
       for (const auto& now : links_) {
@@ -204,6 +219,7 @@ public:
       return total_travel_time;
     }
 
+    /// @brief Computes travel time along a path as the sum of link delays.
     T CalculatePathDelay(const std::vector<int>& path) const {
       T delay = 0;
       for (int link_id : path) {
@@ -212,6 +228,16 @@ public:
       return delay;
     }
 
+    /**
+     * @brief Computes the Relative Gap (RGAP) convergence measure.
+     *
+     * RGAP = 1 - sum_p(D_p * C_min^p) / sum_a(f_a * c_a(f_a))
+     *
+     * The numerator sums demand * shortest path cost over all OD pairs (the "ideal"
+     * system cost if all users took the current shortest path). The denominator is the
+     * current total system travel time. At user equilibrium, RGAP = 0.
+     * See Perederieieva et al. (2015) Eq. 3.
+     */
     T RelativeGap() const {
       T numerator = 0;
       T denominator = 0;
@@ -238,6 +264,7 @@ public:
       return 1 - (numerator / denominator);
     }
 
+    /// @brief Resets all link flows to zero and clears OD pair route sets.
     void Reset() {
       for (auto& link : links_) {
         link.flow = 0;
@@ -256,7 +283,7 @@ private:
 
     // Graph structure components
     std::vector<Link<T>> links_;                ///< All links in the transportation network.
-    std::map <std::pair <int, int>, std::size_t> link_id_map_;
+    std::map <std::pair <int, int>, std::size_t> link_id_map_; ///< Maps (init_node, term_node) to link index.
     std::vector<std::vector<int>> adjacency_list_;       ///< Adjacency list for forward graph traversal.
     std::vector<std::vector<int>> reverse_adjacency_list_; ///< Reverse adjacency list for backward traversal.
 

@@ -12,15 +12,26 @@
 
 namespace TrafficAssignment {
 
+/**
+ * @brief Sequential executor for CNDP optimization steps.
+ *
+ * Runs [step.0], [step.1], ... in order, with each step receiving the network state
+ * (link capacities) left by the previous step as a warm start. After each step,
+ * performs a consistency TA solve and logs a post-step quality point.
+ *
+ * @tparam T Numeric type for flow/capacity computations.
+ */
 template <typename T>
 class OptimizationPipeline {
 public:
   OptimizationPipeline() = default;
 
+  /// @brief Appends an optimization step to the pipeline.
   void AddStep(std::unique_ptr<OptimizationStep<T>> step) {
     steps_.push_back(std::move(step));
   }
 
+  /// @brief Constructs a pipeline from a list of step configurations using OptimizationStepFactory.
   static OptimizationPipeline<T> BuildFromConfigs(
       const std::vector<OptimizationStepConfig>& configs) {
     OptimizationPipeline<T> pipeline;
@@ -30,6 +41,7 @@ public:
     return pipeline;
   }
 
+  /// @brief Executes all steps sequentially, with post-step TA consistency checks and logging.
   void Execute(CndOptimizationContext<T>& ctx) {
     for (std::size_t i = 0; i < steps_.size(); ++i) {
       auto& step = steps_[i];

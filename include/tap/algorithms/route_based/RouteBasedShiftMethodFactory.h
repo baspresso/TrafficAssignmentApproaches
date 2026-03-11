@@ -16,6 +16,12 @@ namespace TrafficAssignment {
     return std::make_unique<class_name<T>>(network); \
   })
 
+/**
+ * @brief Singleton factory for route-based shift methods.
+ *
+ * Registers shift method constructors by name and creates instances on demand.
+ * Currently registers: "NewtonStep". "Krylatov2023" is defined but commented out.
+ */
 template <typename T>
 class RouteBasedShiftMethodFactory {
 public:

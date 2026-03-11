@@ -4,6 +4,16 @@
 #include "TapasShiftMethod.h"
 
 namespace TrafficAssignment {
+  /**
+   * @brief Binary exponential line search shift method for PAS flow redistribution.
+   *
+   * Finds the equilibrating shift amount by doubling the step size until the cost
+   * ordering reverses, then halving until it restores. This bracketing approach
+   * finds the zero-crossing of the cost difference function.
+   * See Perederieieva et al. (2015) Section 4.4.2 for the line search framework.
+   *
+   * @tparam T Numeric type for flow computations.
+   */
   template <typename T>
   class TapasLineSearchShiftMethod : public TapasShiftMethod <T> {
   public:
@@ -12,6 +22,7 @@ namespace TrafficAssignment {
 
     ~TapasLineSearchShiftMethod() {}
 
+    /// @brief Binary exponential line search: double until overshoot, then halve to converge.
     std::pair <T, T> FlowShift(T starting_point, const std::pair <std::vector <int>, std::vector <int>>& pas, std::pair <T, T> total_flow) override {
       T flow_shift = starting_point;
       // Flow is being tranfered from / to the first part of the PAS if direction is true / false

@@ -12,9 +12,20 @@
 
 namespace TrafficAssignment {
 
+/**
+ * @brief Factory that creates OptimizationStep instances from configuration.
+ *
+ * Maps step type strings to concrete step classes:
+ * - "nlopt" -> NloptOptimizationStep (derivative-free: COBYLA, BOBYQA, ISRES, ...)
+ * - "optimality_condition" -> OptimalityConditionStep (sensitivity-based, Chiou 2005)
+ * - "optimlib" -> OptimlibOptimizationStep (population-based: DE, PSO, NM, ...)
+ *
+ * @tparam T Numeric type for flow/capacity computations.
+ */
 template <typename T>
 class OptimizationStepFactory {
 public:
+  /// @brief Creates a step instance from config. Throws on unknown type.
   static std::unique_ptr<OptimizationStep<T>> Create(const OptimizationStepConfig& config) {
     std::string type = config.type;
     std::transform(type.begin(), type.end(), type.begin(),

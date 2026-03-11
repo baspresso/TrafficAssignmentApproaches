@@ -26,9 +26,17 @@ class OriginDestinationPair;
 namespace TrafficAssignment {
 
 /**
-* @brief Manages route assignments and flow distribution for a single origin-destination (O-D) pair.
-* @tparam T Data type for flow/demand values (e.g., double).
-*/
+ * @brief Manages route assignments and flow distribution for a single origin-destination (O-D) pair.
+ *
+ * Each OD pair enforces flow conservation: the sum of all route flows equals demand,
+ * i.e., sum_r h_r = d_{pq}. See Bar-Gera (2010) Eq. 1, Perederieieva et al. (2015) Eq. 2.
+ *
+ * Maintains a set of active routes (column generation) and their flow allocations.
+ * Routes are added via column generation (shortest path search) and flows are
+ * redistributed by shift methods until equilibrium is reached.
+ *
+ * @tparam T Data type for flow/demand values (e.g., double).
+ */
 template <class T>
 class OriginDestinationPair {
 static constexpr T MAX_ROUTE_DELAY = 1e9; ///< Upper bound for route delays (prevents overflow).
@@ -106,6 +114,16 @@ public:
     return -1;
   }
 
+  /**
+   * @brief Sets new route flow values, enforcing flow conservation sum(F_k) = D_p.
+   *
+   * Normalizes the provided flows to match total demand, removes routes with
+   * non-positive flow, and updates the network's aggregate link flows.
+   * See Perederieieva et al. (2015) Eq. 2 for the flow conservation constraint.
+   *
+   * @param routes_flow_update New flow values for each route (will be normalized).
+   * @return Normalized flow values after conservation enforcement.
+   */
   std::vector<T> SetRoutesFlow(std::vector<T> routes_flow_update) {
       // 1. Validate: ensure at least one route has positive flow before modifying state
       bool has_positive = false;
@@ -154,6 +172,16 @@ public:
   // Graph algorithms
   // ----------------
 
+  /**
+   * @brief Adds a new route (column generation step) if not already present.
+   *
+   * Part of the column generation procedure: new shortest paths are added to
+   * expand the route set. The first route receives full demand; subsequent
+   * routes start with zero flow. See Perederieieva et al. (2015) Fig. 2.
+   *
+   * @param new_route Ordered list of link IDs from origin to destination.
+   * @return True if route was added, false if duplicate.
+   */
   bool AddNewRoute(std::vector<int> new_route) {
     // Check for duplicate routes
     for (const auto& existing_route : routes_) {
@@ -187,6 +215,8 @@ public:
 
     return true;
   }
+  /// @brief Returns the max-min route cost difference (disequilibrium measure).
+  /// At user equilibrium, this value approaches zero for all OD pairs.
   T RoutesDelta() const {
     T delay_min = MAX_ROUTE_DELAY, delay_max = 0, delay_route = 0;
     if (routes_.size() > 0) {
@@ -202,6 +232,7 @@ public:
     return std::abs(delay_max - delay_min);
   }
 
+  /// @brief Returns the current travel time (delay) for each active route.
   std::vector <T> RoutesDelays() const {
     std::vector <T> routes_delays(routes_.size());
     for (int i = 0; i < routes_.size(); i++) {
@@ -210,6 +241,7 @@ public:
     return routes_delays;
   }
 
+  /// @brief Returns true if all active routes contain at least one link with nonzero capacity.
   bool CheckNonZeroCapacityRoutes() const {
     bool fl = true;
     for (int i = 0; i < this->routes_.size(); i++) {
@@ -220,6 +252,7 @@ public:
     return fl;
   }
 
+  /// @brief Clears all routes and resets link flow contributions to zero.
   void Reset() {
     routes_.clear();
     routes_flow_.clear();

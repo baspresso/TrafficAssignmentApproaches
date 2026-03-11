@@ -17,18 +17,25 @@
 
 namespace TrafficAssignment {
 
+/**
+ * @brief Configuration for CNDP metrics collection and output.
+ */
 struct CndMetricsConfig {
-  bool enable_trace = true;
-  bool enable_relative_gap = true;
-  int relative_gap_sample_period = 10;
-  int flush_every_n_points = 0;
-  bool write_metadata_json = true;
-  bool write_summary_csv = true;
-  std::string output_root = "performance_results";
-  std::string run_id;
-  std::string scenario_name;
+  bool enable_trace = true;             ///< Write per-iteration trace CSV (objective vs time).
+  bool enable_relative_gap = true;      ///< Sample TAP relative gap during trace recording.
+  int relative_gap_sample_period = 10;  ///< Sample RGAP every N trace points (expensive to compute).
+  int flush_every_n_points = 0;         ///< Flush trace to disk every N points (0 = flush at end).
+  bool write_metadata_json = true;      ///< Write JSON file with algorithm config and run parameters.
+  bool write_summary_csv = true;        ///< Append one-line summary to shared CSV (append-only).
+  bool append_dataset_subdir = true;    ///< Append dataset name as subdirectory to output_root.
+  std::string output_root = "performance_results"; ///< Root directory for all metrics output.
+  std::string run_id;                   ///< Unique run identifier (auto-generated if empty).
+  std::string scenario_name;            ///< Scenario label for grouping runs in analysis.
 };
 
+/**
+ * @brief Metadata describing a CNDP run (written to JSON and summary CSV).
+ */
 struct CndRunMetadata {
   std::string dataset_name;
   std::string approach_name;
@@ -47,21 +54,27 @@ struct CndRunMetadata {
   std::size_t number_of_od_pairs = 0;
 };
 
+/**
+ * @brief Single data point in the convergence trace (one per objective evaluation).
+ */
 struct CndTracePoint {
-  double elapsed_seconds = 0.0;
-  std::string phase;
-  int step = 0;
-  double objective = 0.0;
-  double best_feasible_objective = std::numeric_limits<double>::quiet_NaN();
-  double total_travel_time = 0.0;
-  double budget = 0.0;
-  double budget_violation = 0.0;
-  double relative_gap = std::numeric_limits<double>::quiet_NaN();
-  double ta_compute_seconds = 0.0;
+  double elapsed_seconds = 0.0;         ///< Wall-clock time since run start.
+  std::string phase;                    ///< Optimization phase ("standard_eval", "optcond_iter", etc.).
+  int step = 0;                         ///< Step counter within the current phase.
+  double objective = 0.0;               ///< Upper-level objective F(y) = TSTT + BudgetCost.
+  double best_feasible_objective = std::numeric_limits<double>::quiet_NaN(); ///< Best objective among budget-feasible solutions.
+  double total_travel_time = 0.0;       ///< TSTT at this evaluation.
+  double budget = 0.0;                  ///< Investment cost at this evaluation.
+  double budget_violation = 0.0;        ///< max(0, budget - budget_upper_bound).
+  double relative_gap = std::numeric_limits<double>::quiet_NaN(); ///< TAP relative gap (sampled periodically).
+  double ta_compute_seconds = 0.0;      ///< Time spent solving the lower-level TAP.
 };
 
+/**
+ * @brief Aggregated summary of a completed CNDP run (appended to summary CSV).
+ */
 struct CndRunSummary {
-  std::string status = "success";
+  std::string status = "success";       ///< "success" or "failure".
   double total_elapsed_seconds = 0.0;
   int standard_eval_count = 0;
   int optimality_condition_iteration_count = 0;
@@ -79,6 +92,18 @@ struct CndRunSummary {
   double max_budget_violation = 0.0;
 };
 
+/**
+ * @brief Records convergence traces, metadata, and summary statistics for bilevel CNDP experiments.
+ *
+ * Outputs three file types per run:
+ * - Trace CSV: per-iteration objective, budget, RGAP, timing (for convergence plots)
+ * - Metadata JSON: algorithm configuration and problem parameters
+ * - Summary CSV: one-line append-only record per run (for comparison tables)
+ *
+ * The summary CSV includes a Scenario column for grouping multiple runs in analysis.
+ *
+ * @tparam T Numeric type for flow/capacity computations.
+ */
 template <typename T>
 class CndStatisticsRecorder {
 public:
@@ -88,6 +113,7 @@ public:
       best_feasible_objective_(std::numeric_limits<double>::infinity()),
       flushed_points_(0) {}
 
+  /// @brief Initializes a new recording session, creating output files.
   void StartRun(const CndMetricsConfig& config, const CndRunMetadata& metadata) {
     config_ = config;
     metadata_ = metadata;
@@ -143,6 +169,7 @@ public:
     return step % config_.relative_gap_sample_period == 0;
   }
 
+  /// @brief Records a single trace point (objective evaluation) to the convergence trace.
   void LogPoint(const std::string& phase,
                 int step,
                 double objective,
@@ -193,6 +220,7 @@ public:
     }
   }
 
+  /// @brief Finalizes the recording session, flushing trace and writing summary CSV.
   void StopRun(const CndRunSummary& summary) {
     if (!is_recording_) {
       return;
@@ -208,6 +236,38 @@ public:
 
   const std::string& run_id() const {
     return run_id_;
+  }
+
+  const std::filesystem::path& output_dir() const {
+    return output_dir_;
+  }
+
+  /// @brief Writes per-link solution CSV with optimized capacities, flows, and bounds.
+  void WriteSolutionCSV(
+      const std::vector<DirectedLinkCapacityConstraint>& constraints) {
+    if (output_dir_.empty()) return;
+
+    const std::string approach_name =
+      metadata_.approach_name.empty() ? "UnknownApproach" : metadata_.approach_name;
+    const auto solution_path =
+      output_dir_ / ("BilevelCND_" + approach_name + "_" + run_id_ + "_solution.csv");
+
+    std::ofstream file(solution_path, std::ios::out);
+    file << "link_id,init_node,term_node,optimized_capacity,"
+            "flow,lower_bound,upper_bound\n";
+    file << std::setprecision(10);
+
+    const int n_links = network_.number_of_links();
+    for (int i = 0; i < n_links; ++i) {
+      const auto& link = network_.links()[i];
+      file << i << ","
+           << link.init << ","
+           << link.term << ","
+           << link.capacity << ","
+           << link.flow << ","
+           << constraints[i].lower_bound << ","
+           << constraints[i].upper_bound << "\n";
+    }
   }
 
   double best_feasible_objective() const {
@@ -272,7 +332,10 @@ private:
         root = cwd / root;
       }
     }
-    return root / network_.name();
+    if (config_.append_dataset_subdir) {
+      return root / network_.name();
+    }
+    return root;
   }
 
   void InitializeTraceFile() const {

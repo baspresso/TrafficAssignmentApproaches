@@ -13,10 +13,18 @@ namespace fs = std::filesystem;
 
 namespace TrafficAssignment {
 
+/**
+ * @brief Loads transportation network data from TNTP-format CSV files.
+ *
+ * Reads network topology (*_net.csv) and trip demand matrices (*_trips.csv)
+ * from the data/TransportationNetworks/{dataset}/ directory and constructs
+ * a fully initialized Network object with adjacency lists.
+ */
 class NetworkBuilder {
 public:
     NetworkBuilder() = default;
 
+    /// @brief Loads and builds a complete Network from a named TNTP dataset.
     template <typename T>
     Network<T> BuildFromDataset(const std::string& dataset_name) {
         std::string name = dataset_name;
@@ -31,8 +39,9 @@ public:
     }
 
 private:
+    /// @brief Parses network metadata and link data from the *_net.csv file.
     template <typename T>
-    std::tuple<int, int, std::vector<Link<T>>> 
+    std::tuple<int, int, std::vector<Link<T>>>
     LoadNetworkData(const std::string& dataset_name) {
         namespace fs = std::filesystem;
         
@@ -62,6 +71,7 @@ private:
         return {nodes, zones, links};
     }
 
+    /// @brief Reads the OD demand matrix from the *_trips.csv file.
     template <typename T>
     std::vector<std::vector<T>> LoadTripData(const std::string& dataset_name, int zones) {
         namespace fs = std::filesystem;
@@ -93,8 +103,9 @@ private:
         return trips;
     }
 
+    /// @brief Builds forward and reverse adjacency lists from the link vector.
     template <typename T>
-    std::pair<std::vector<std::vector<int>>, std::vector<std::vector<int>>> 
+    std::pair<std::vector<std::vector<int>>, std::vector<std::vector<int>>>
     BuildAdjacencyLists(const std::vector<Link<T>>& links, int node_count) {
         std::vector<std::vector<int>> adjacency(node_count);
         std::vector<std::vector<int>> reverse_adjacency(node_count);

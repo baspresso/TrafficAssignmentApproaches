@@ -22,6 +22,24 @@
 
 namespace TrafficAssignment {
 
+/**
+ * @brief Population-based metaheuristic optimization step using the OptimLib library.
+ *
+ * Supports Differential Evolution (DE, DE_PRMM), Particle Swarm Optimization (PSO, PSO_DV),
+ * Nelder-Mead (NM), and Gradient Descent (GD). Uses soft budget penalty since population-based
+ * methods do not natively support nonlinear inequality constraints:
+ *
+ *   F_penalized(y) = TSTT(x(y)) + theta * BudgetCost(y) + lambda * max(0, B(y) - B_max)^2
+ *
+ * Includes SIGSEGV crash recovery via setjmp/longjmp: population-based methods explore extreme
+ * capacity combinations that can cause the TA solver (especially TAPAS) to segfault. The signal
+ * handler catches SIGSEGV during TA computation and returns a penalty objective instead.
+ *
+ * Initial population is narrowed to [0.8*x, 1.2*x] around current capacities (clamped to
+ * constraint bounds) to avoid pathological starting points.
+ *
+ * @tparam T Numeric type for flow/capacity computations.
+ */
 template <typename T>
 class OptimlibOptimizationStep : public OptimizationStep<T> {
 public:
@@ -34,6 +52,7 @@ public:
     return "optimlib(" + config_.algorithm + ")";
   }
 
+  /// @brief Configures OptimLib, sets bounds and population range, and runs the selected algorithm.
   StepResult Execute(CndOptimizationContext<T>& ctx) override {
     StepResult result;
     if (config_.max_iterations == 0) {
@@ -177,10 +196,11 @@ private:
   Eigen::VectorXd lower_bounds_;
   bool needs_reset_ = false;
 
-  // SIGSEGV recovery for TA solver crashes
-  static inline std::jmp_buf s_jump_buf_;
-  static inline bool s_jump_valid_ = false;
+  // --- SIGSEGV recovery for TA solver crashes ---
+  static inline std::jmp_buf s_jump_buf_;  ///< setjmp buffer for crash recovery.
+  static inline bool s_jump_valid_ = false; ///< True while TA computation is protected by the handler.
 
+  /// @brief SIGSEGV signal handler: longjmp back to the setjmp point if active.
   static void SignalHandler(int sig) {
     if (sig == SIGSEGV && s_jump_valid_) {
       s_jump_valid_ = false;
@@ -201,6 +221,13 @@ private:
            algo == "PARTICLE_SWARM";
   }
 
+  /**
+   * @brief Evaluates F(y) + soft budget penalty with SIGSEGV crash protection.
+   *
+   * Clamps capacities to bounds, enforces budget feasibility via projection,
+   * solves TAP with signal-handler protection, and returns penalized objective.
+   * On SIGSEGV recovery, marks TA state for reset and returns kInvalidObjectivePenalty.
+   */
   double ObjectiveFunction(const Eigen::VectorXd& vals_inp,
                            Eigen::VectorXd* /*grad_out*/) {
     auto& ctx = *ctx_;
@@ -215,6 +242,20 @@ private:
       val = std::min(val, ctx.constraints[i].upper_bound);
       val = std::max(val, kMinCapacity);
       ctx.network.mutable_links()[i].capacity = val;
+    }
+
+    // Enforce budget feasibility: project capacity vector onto budget constraint
+    {
+      std::vector<double> cap_vec(n);
+      std::vector<double> lb_vec(n);
+      for (int i = 0; i < n; ++i) {
+        cap_vec[i] = static_cast<double>(ctx.network.mutable_links()[i].capacity);
+        lb_vec[i] = ctx.constraints[i].lower_bound;
+      }
+      ctx.EnforceBudgetFeasibility(cap_vec, lb_vec);
+      for (int i = 0; i < n; ++i) {
+        ctx.network.mutable_links()[i].capacity = static_cast<T>(cap_vec[i]);
+      }
     }
 
     double ta_compute_seconds = 0.0;
@@ -252,7 +293,7 @@ private:
     }
 
     double total_travel_time = ctx.network.TotalTravelTime();
-    double budget_function = ctx.BudgetFunction(n, vals_inp.data());
+    double budget_function = static_cast<double>(ctx.Budget());
     const double budget_violation = std::max(0.0, budget_function - ctx.budget_upper_bound);
     double soft_budget_penalty = 0.0;
     if (budget_violation > 0.0) {

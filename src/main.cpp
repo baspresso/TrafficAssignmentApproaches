@@ -178,6 +178,10 @@ void ApplyMetricsOption(RunConfig& config,
     config.metrics.scenario_name = raw_value;
     return;
   }
+  if (key == "no_dataset_subdir") {
+    config.metrics.append_dataset_subdir = !ParseBool(raw_value, key);
+    return;
+  }
 
   throw std::runtime_error("Unknown metrics option: '" + raw_key + "'");
 }
@@ -318,6 +322,7 @@ void ApplyEnvironmentOverrides(RunConfig& config) {
   apply_metrics("CND_METRICS_OUTPUT_ROOT", "output_root");
   apply_metrics("CND_METRICS_RUN_ID", "run_id");
   apply_metrics("CND_METRICS_SCENARIO_NAME", "scenario_name");
+  apply_metrics("CND_METRICS_NO_DATASET_SUBDIR", "no_dataset_subdir");
 }
 
 void ApplyCliOverrides(const CliOptions& cli, RunConfig& config) {
@@ -416,7 +421,8 @@ void PrintHelp() {
     << "  --metrics_write_summary_csv <true|false>\n"
     << "  --metrics_output_root <path>\n"
     << "  --metrics_run_id <id>\n"
-    << "  --metrics_scenario_name <name>\n";
+    << "  --metrics_scenario_name <name>\n"
+    << "  --metrics_no_dataset_subdir <true|false>  Skip dataset subdirectory in output\n";
 }
 
 void PrintEffectiveConfig(const RunConfig& config,
@@ -447,6 +453,9 @@ void PrintEffectiveConfig(const RunConfig& config,
     std::cout << "  rgap_check_interval: " << config.rgap_check_interval << '\n';
   std::cout << "  budget_upper_bound: " << config.budget_upper_bound << '\n';
   std::cout << "  metrics.output_root: " << config.metrics.output_root << '\n';
+  if (!config.metrics.append_dataset_subdir) {
+    std::cout << "  metrics.no_dataset_subdir: true\n";
+  }
   if (!config.metrics.scenario_name.empty()) {
     std::cout << "  metrics.scenario_name: " << config.metrics.scenario_name << '\n';
   }

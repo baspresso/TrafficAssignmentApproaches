@@ -4,6 +4,17 @@
 #include "TapasShiftMethod.h"
 
 namespace TrafficAssignment {
+  /**
+   * @brief Second-order gradient descent shift method using both first and second derivatives.
+   *
+   * Computes the shift amount using the ratio of first to second derivatives on each
+   * PAS segment, combining them via a weighted formula. Falls back to equal splitting
+   * when flow on the minor segment is below threshold.
+   *
+   * @note Not registered in TapasShiftMethodFactory; available for experimental use only.
+   *
+   * @tparam T Numeric type for flow computations.
+   */
   template <typename T>
   class TapasAdvancedGradientDescentShiftMethod : public TapasShiftMethod <T> {
   public:
@@ -12,6 +23,7 @@ namespace TrafficAssignment {
 
     ~TapasAdvancedGradientDescentShiftMethod() {}
 
+    /// @brief Computes second-order gradient descent flow shift for PAS segments.
     std::pair <T, T> FlowShift(T starting_point, const std::pair <std::vector <int>, std::vector <int>>& pas, std::pair <T, T> total_flow) override {
       T flow_shift = 0;
       // Flow is being tranfered from / to the first part of the PAS if direction is true / false

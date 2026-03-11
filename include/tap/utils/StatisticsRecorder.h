@@ -10,6 +10,15 @@
 
 namespace TrafficAssignment {
 
+/**
+ * @brief Records TAP convergence metrics (RGAP, objective, elapsed time) to CSV.
+ *
+ * Tracks wall-clock time (excluding time spent computing statistics) and writes
+ * periodic snapshots of convergence state. Used by TrafficAssignmentApproach
+ * implementations to produce performance traces for analysis.
+ *
+ * Output CSV columns: RelativeGap, ObjectiveFunction, ElapsedTime(s).
+ */
 template <typename T>
 class StatisticsRecorder {
 public:
@@ -23,6 +32,7 @@ public:
 
     void SetOutputRoot(const std::string& root) { output_root_ = root; }
 
+    /// @brief Initializes output CSV file and starts the wall-clock timer.
     void StartRecording(std::string approach_name) {
         if(is_recording_) return;
 
@@ -33,6 +43,7 @@ public:
         is_recording_ = true;
     }
 
+    /// @brief Appends one row (RGAP, objective, elapsed time) to the trace CSV.
     void RecordStatistics() {
         if(!is_recording_) return;
         
@@ -63,11 +74,13 @@ public:
         // Note: Removing 'network_ = nullptr;' as it's a reference and cannot be assigned nullptr.
     }
 
+    /// @brief Pauses the wall-clock timer (to exclude statistics computation time).
     void PauseRecording() {
         if(!is_recording_) return;
         pause_start_ = std::chrono::high_resolution_clock::now();
     }
 
+    /// @brief Resumes the wall-clock timer, accumulating the paused duration.
     void ResumeRecording() {
         if(!is_recording_) return;
         auto duration = std::chrono::high_resolution_clock::now() - pause_start_;

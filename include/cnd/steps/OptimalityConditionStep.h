@@ -19,6 +19,29 @@ namespace TrafficAssignment {
 namespace mp_internal = boost::multiprecision;
 using high_prec_internal = mp_internal::cpp_dec_float_50;
 
+/**
+ * @brief Sensitivity-analysis-based optimization step using first-order optimality conditions.
+ *
+ * Implements the iterative capacity update procedure from Chiou (2005) Section 3.
+ * Each iteration:
+ * 1. Solves the lower-level TAP for current capacities y to get equilibrium flows x(y).
+ * 2. Builds a Jacobian-based OD cache for efficient sensitivity computation.
+ * 3. Computes the optimality function phi_a for each design link (Chiou 2005, Eq. 9):
+ *      phi_a = dF/dy_a = sum_w d_w * (eT J^{-1} dc_a/dy_a) / (eT J^{-1} e) / theta
+ *    where J is the route cost Jacobian, d_w is OD demand, and e is the all-ones vector.
+ * 4. Transfers capacity between links with max/min phi_a to equalize optimality values.
+ *
+ * Two iteration modes based on budget usage:
+ * - Budget exhausted (B(y) >= B_max - threshold): redistributes capacity within fixed budget
+ *   by transferring from max-phi link to min-phi link (budget-neutral).
+ * - Budget remaining (B(y) < B_max - threshold): expands the link with largest |phi_a - 1|,
+ *   moving it toward the common optimality value of 1.0.
+ *
+ * Uses Boost.Multiprecision (cpp_dec_float_50) for Jacobian inversion to avoid
+ * numerical issues with near-singular route cost matrices.
+ *
+ * @tparam T Numeric type for flow/capacity computations.
+ */
 template <typename T>
 class OptimalityConditionStep : public OptimizationStep<T> {
   using MatrixXd = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
@@ -33,6 +56,7 @@ public:
     return "optimality_condition";
   }
 
+  /// @brief Runs iterative capacity updates using optimality conditions. Chiou (2005) Section 3.
   StepResult Execute(CndOptimizationContext<T>& ctx) override {
     StepResult result;
     if (config_.max_iterations == 0) {
@@ -110,17 +134,26 @@ private:
 
   // --- Optimality math ---
 
+  /**
+   * @brief Cached per-OD-pair data for efficient optimality function evaluation.
+   *
+   * Precomputes the route cost Jacobian inverse, the all-ones column eT*J^{-1}*e denominator,
+   * and route-link membership sets. This avoids redundant matrix inversions when evaluating
+   * phi_a across all design links.
+   */
   struct OdCache {
-    std::vector<std::vector<int>> routes;
-    MatrixHightPrecision          jacobi_inverse;
-    MatrixHightPrecision          e_col;
-    MatrixHightPrecision          inv_transpose_e;  // J⁻¹ᵀ * e, precomputed R×1 vector
-    high_prec_internal            denominator;
-    T                             demand;
-    std::vector<std::unordered_set<int>> route_link_sets;  // route_link_sets[r] = {link IDs in route r}
-    bool                          valid = false;
+    std::vector<std::vector<int>> routes;            ///< Route definitions (list of link IDs per route).
+    MatrixHightPrecision          jacobi_inverse;    ///< J^{-1}: inverse of route cost Jacobian (high precision).
+    MatrixHightPrecision          e_col;             ///< e: all-ones column vector (R x 1).
+    MatrixHightPrecision          inv_transpose_e;   ///< J^{-1}^T * e: precomputed for O(R) dot product.
+    high_prec_internal            denominator;       ///< eT * J^{-1} * e: shared denominator for all links.
+    T                             demand;            ///< OD pair demand d_w.
+    std::vector<std::unordered_set<int>> route_link_sets; ///< route_link_sets[r] = {link IDs in route r} for O(1) lookup.
+    bool                          valid = false;     ///< False if Jacobian is near-singular.
   };
 
+  /// @brief Builds the dc_a/dy_a column: partial derivative of route costs w.r.t. capacity of link_index.
+  ///        Non-zero only for routes containing the link. Chiou (2005) Eq. 6.
   MatrixXd CapacityDerColumn(CndOptimizationContext<T>& ctx,
                              const std::vector<std::vector<int>>& routes,
                              int link_index) {
@@ -133,7 +166,7 @@ private:
     return res;
   }
 
-  // Fast version using precomputed route-link sets from OdCache
+  /// @brief Fast dc_a/dy_a column using precomputed route-link membership sets from OdCache.
   MatrixXd CapacityDerColumnCached(CndOptimizationContext<T>& ctx,
                                     const OdCache& cache,
                                     int link_index) {
@@ -157,6 +190,14 @@ private:
     return target;
   }
 
+  /**
+   * @brief Computes the optimality function phi_a for a single link. Chiou (2005) Eq. 9.
+   *
+   * phi_a = (1/theta) * sum_w d_w * (eT J_w^{-1} dc_a) / (eT J_w^{-1} e)
+   *
+   * At optimality, phi_a should be equal across all active design links (KKT condition).
+   * This is the non-cached version that rebuilds the Jacobian from scratch.
+   */
   T OptimalityFunction(CndOptimizationContext<T>& ctx,
                         int link_index,
                         bool flow_computation = true) {
@@ -190,6 +231,7 @@ private:
     return result;
   }
 
+  /// @brief Builds the OD cache for all OD pairs: precomputes Jacobian inverses and denominators.
   std::vector<OdCache> BuildOdCache(CndOptimizationContext<T>& ctx) {
     const int n_od = ctx.network.number_of_od_pairs();
     std::vector<OdCache> od_cache(n_od);
@@ -222,6 +264,7 @@ private:
     return od_cache;
   }
 
+  /// @brief Computes phi_a using precomputed OdCache (avoids redundant Jacobian inversions).
   T OptimalityFunctionFromCache(CndOptimizationContext<T>& ctx,
                                  int link_index,
                                  const std::vector<OdCache>& od_cache) {
@@ -241,8 +284,9 @@ private:
     return ctx.IsFiniteScalar(result) ? result : ctx.NaNValue();
   }
 
-  // --- Upper-bound optimality iteration ---
+  // --- Upper-bound budget optimality iteration (budget exhausted) ---
 
+  /// @brief Clamps transfer amount to respect both links' capacity box constraints [lb, ub].
   T RespectedAmountConstraints(CndOptimizationContext<T>& ctx,
                                 T amount, int max_optimality_index, int min_optimality_index) {
     auto max_optimality_capacity = ctx.network.mutable_links()[max_optimality_index].capacity;
@@ -252,9 +296,12 @@ private:
     return amount;
   }
 
-  // Approximate transfer amount using first-order sensitivity analysis.
-  // Instead of binary search with repeated full TA solves, uses the already-computed
-  // optimality function values and constraint bounds to estimate a conservative step.
+  /**
+   * @brief Estimates capacity transfer amount using first-order sensitivity.
+   *
+   * Uses the gap between max/min optimality function values to scale the transfer
+   * conservatively, rather than binary search with repeated TA solves.
+   */
   T ApproximateTransferAmount(CndOptimizationContext<T>& ctx,
                                int max_optimality_index, int min_optimality_index,
                                T max_value, T min_value) {
@@ -282,7 +329,7 @@ private:
     return std::max(amount, T(0));
   }
 
-  // Validation: run ONE TA solve to verify the transfer is valid, with fallback halving
+  /// @brief Validates transfer with one TA solve; halves amount on failure (up to kMaxValidationRetries).
   T ValidatedTransferAmount(CndOptimizationContext<T>& ctx,
                               int max_optimality_index, int min_optimality_index,
                               T initial_amount) {
@@ -319,6 +366,13 @@ private:
     return amount;
   }
 
+  /**
+   * @brief Budget-exhausted iteration: transfers capacity from max-phi to min-phi link.
+   *
+   * Finds the links with maximum and minimum optimality function values among active links
+   * (flow > threshold, capacity not at bounds), then transfers capacity to equalize phi.
+   * Budget-neutral since capacity is redistributed between two links.
+   */
   void UpperBoundBudgetOptimalityIteration(CndOptimizationContext<T>& ctx) {
     int max_index = -1, min_index = -1;
 
@@ -373,8 +427,9 @@ private:
     ctx.network.mutable_links()[min_index].capacity -= amount;
   }
 
-  // --- Non-upper-bound optimality iteration ---
+  // --- Non-upper-bound budget optimality iteration (budget remaining) ---
 
+  /// @brief Checks if a link is eligible for capacity adjustment (active flow, not at bound in wrong direction).
   bool ProcessingCheck(CndOptimizationContext<T>& ctx,
                        int link_index, T middle_bound_value,
                        const std::vector<OdCache>& od_cache) {
@@ -394,6 +449,7 @@ private:
     return true;
   }
 
+  /// @brief Clamps transfer amount to box constraints and remaining budget.
   T NonUpperBoundRespectedAmountConstraints(CndOptimizationContext<T>& ctx,
                                              T amount, int max_optimality_index) {
     auto max_optimality_capacity = ctx.network.mutable_links()[max_optimality_index].capacity;
@@ -410,8 +466,7 @@ private:
     return amount;
   }
 
-  // Approximate non-upper-bound transfer amount using first-order sensitivity.
-  // Replaces the binary search loop that called full TA solves repeatedly.
+  /// @brief Estimates single-link capacity change to move phi_a toward the target value (1.0).
   T ApproximateNonUpperBoundTransferAmount(CndOptimizationContext<T>& ctx,
                                             int max_optimality_index,
                                             T cur_value, T middle_bound_value) {
@@ -447,7 +502,7 @@ private:
     }
   }
 
-  // Validate non-upper-bound transfer with ONE TA solve, halving on failure
+  /// @brief Validates single-link transfer with one TA solve; halves on failure.
   T ValidatedNonUpperBoundTransferAmount(CndOptimizationContext<T>& ctx,
                                           int max_optimality_index,
                                           T middle_bound_value,
@@ -483,6 +538,13 @@ private:
     return amount;
   }
 
+  /**
+   * @brief Budget-remaining iteration: expands the link with largest deviation from target phi = 1.0.
+   *
+   * When budget is not yet exhausted, adjusts a single link's capacity to move its optimality
+   * function value toward the target of 1.0 (the KKT multiplier for the budget constraint
+   * when budget is slack).
+   */
   void NonUpperBoundBudgetOptimalityIteration(CndOptimizationContext<T>& ctx) {
     T middle_bound_value = 1.0;
     int max_optimality_index = -1;

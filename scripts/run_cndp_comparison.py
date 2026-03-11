@@ -18,7 +18,10 @@ Usage:
 
 import argparse
 import csv
+import json
 import math
+import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -82,8 +85,9 @@ def _scale_iterations(steps: list[StepConfig], scale: float) -> list[StepConfig]
 
 
 def build_core_scenarios() -> list[Scenario]:
-    """Build the core comparison scenarios (dataset-independent step definitions)."""
+    """Build the core comparison scenarios for the article (10 + etalon)."""
     return [
+        # 0. Etalon — reference convergence baseline
         Scenario(
             name="Etalon",
             description="Reference solution (COBYLA 5000)",
@@ -93,101 +97,78 @@ def build_core_scenarios() -> list[Scenario]:
             is_etalon=True,
             skip_scaling=True,
         ),
-        Scenario(
-            name="COBYLA-only",
-            description="Pure NLopt local optimizer (COBYLA 500 iters)",
-            steps=[
-                StepConfig(type="nlopt", algorithm="LN_COBYLA", max_iterations=500, tolerance=1e-4),
-            ],
-        ),
-        Scenario(
-            name="BOBYQA-only",
-            description="Pure NLopt local optimizer (BOBYQA 500 iters)",
-            steps=[
-                StepConfig(type="nlopt", algorithm="LN_BOBYQA", max_iterations=500, tolerance=1e-4),
-            ],
-        ),
+        # 1. OptCond-only — proposed method
         Scenario(
             name="OptCond-only",
-            description="Pure optimality condition method (35 iters)",
+            description="Proposed optimality condition method (35 iters)",
             steps=[
                 StepConfig(type="optimality_condition", max_iterations=35),
             ],
         ),
+        # 2. COBYLA-only — popular derivative-free constrained optimizer
+        Scenario(
+            name="COBYLA-only",
+            description="NLopt COBYLA (500 iters)",
+            steps=[
+                StepConfig(type="nlopt", algorithm="LN_COBYLA", max_iterations=500, tolerance=1e-4),
+            ],
+        ),
+        # 3. BOBYQA-only — quadratic model (penalty-based constraints)
+        Scenario(
+            name="BOBYQA-only",
+            description="NLopt BOBYQA (500 iters)",
+            steps=[
+                StepConfig(type="nlopt", algorithm="LN_BOBYQA", max_iterations=500, tolerance=1e-4),
+            ],
+        ),
+        # 4. ISRES-only — evolutionary strategy with constraint ranking
+        Scenario(
+            name="ISRES-only",
+            description="NLopt global ISRES (500 iters)",
+            steps=[
+                StepConfig(type="nlopt", algorithm="GN_ISRES", max_iterations=500, tolerance=1e-4),
+            ],
+        ),
+        # 5. DE-only — Differential Evolution
+        Scenario(
+            name="DE-only",
+            description="OptimLib Differential Evolution (2 gens, pop=100)",
+            steps=[
+                StepConfig(type="optimlib", algorithm="DE", max_iterations=2, population_size=100),
+            ],
+        ),
+        # 6. PSO-only — Particle Swarm
+        Scenario(
+            name="PSO-only",
+            description="OptimLib Particle Swarm (3 gens, pop=100)",
+            steps=[
+                StepConfig(type="optimlib", algorithm="PSO", max_iterations=3, population_size=100),
+            ],
+        ),
+        # 7. COBYLA→OptCond — OptCond as refinement
         Scenario(
             name="COBYLA-then-OptCond",
-            description="COBYLA 200 + OptCond 10 (default combo)",
+            description="COBYLA 200 + OptCond 10",
             steps=[
                 StepConfig(type="nlopt", algorithm="LN_COBYLA", max_iterations=200, tolerance=1e-4),
                 StepConfig(type="optimality_condition", max_iterations=10),
             ],
         ),
-        Scenario(
-            name="ISRES-then-OptCond",
-            description="Global optimizer ISRES 200 + OptCond 10",
-            steps=[
-                StepConfig(type="nlopt", algorithm="GN_ISRES", max_iterations=200, tolerance=1e-4),
-                StepConfig(type="optimality_condition", max_iterations=10),
-            ],
-        ),
-        Scenario(
-            name="BOBYQA-then-OptCond",
-            description="BOBYQA 200 + OptCond 10",
-            steps=[
-                StepConfig(type="nlopt", algorithm="LN_BOBYQA", max_iterations=200, tolerance=1e-4),
-                StepConfig(type="optimality_condition", max_iterations=10),
-            ],
-        ),
+        # 8. OptCond→COBYLA — OptCond as warm-start
         Scenario(
             name="OptCond-then-COBYLA",
-            description="Reversed: OptCond 15 then COBYLA 200",
+            description="OptCond 15 + COBYLA 200",
             steps=[
                 StepConfig(type="optimality_condition", max_iterations=15),
                 StepConfig(type="nlopt", algorithm="LN_COBYLA", max_iterations=200, tolerance=1e-4),
             ],
         ),
-        # OptimLib population-based metaheuristics
-        Scenario(
-            name="DE-only",
-            description="OptimLib Differential Evolution (500 gens)",
-            steps=[
-                StepConfig(type="optimlib", algorithm="DE", max_iterations=500),
-            ],
-        ),
-        Scenario(
-            name="PSO-only",
-            description="OptimLib Particle Swarm Optimization (500 gens)",
-            steps=[
-                StepConfig(type="optimlib", algorithm="PSO", max_iterations=500),
-            ],
-        ),
-        Scenario(
-            name="DE-PRMM-only",
-            description="OptimLib DE with Parameter Rotation (500 gens)",
-            steps=[
-                StepConfig(type="optimlib", algorithm="DE_PRMM", max_iterations=500),
-            ],
-        ),
-        Scenario(
-            name="NM-only",
-            description="OptimLib Nelder-Mead (500 iters)",
-            steps=[
-                StepConfig(type="optimlib", algorithm="NM", max_iterations=500),
-            ],
-        ),
+        # 9. DE→OptCond — OptCond refining metaheuristic
         Scenario(
             name="DE-then-OptCond",
-            description="DE 200 gens + OptCond 10",
+            description="DE 1 gen (pop=100) + OptCond 10",
             steps=[
-                StepConfig(type="optimlib", algorithm="DE", max_iterations=200),
-                StepConfig(type="optimality_condition", max_iterations=10),
-            ],
-        ),
-        Scenario(
-            name="PSO-then-OptCond",
-            description="PSO 200 gens + OptCond 10",
-            steps=[
-                StepConfig(type="optimlib", algorithm="PSO", max_iterations=200),
+                StepConfig(type="optimlib", algorithm="DE", max_iterations=1, population_size=100),
                 StepConfig(type="optimality_condition", max_iterations=10),
             ],
         ),
@@ -329,6 +310,7 @@ def run_scenario(
     scenario: Scenario,
     config_path: Path,
     time_limit: Optional[int] = None,
+    run_dir: Optional[Path] = None,
 ) -> dict:
     """Run a single scenario and return results."""
     cmd = [
@@ -336,6 +318,11 @@ def run_scenario(
         "--config", str(config_path),
         "--metrics_scenario_name", scenario.name,
     ]
+    if run_dir is not None:
+        cmd += [
+            "--metrics_output_root", str(run_dir),
+            "--metrics_no_dataset_subdir", "true",
+        ]
 
     print(f"\n{'='*70}")
     print(f"Running: {scenario.name}")
@@ -418,12 +405,15 @@ def run_scenario(
         }
 
 
-def write_comparison_results(results: list[dict], dataset: str):
+def write_comparison_results(results: list[dict], dataset: str,
+                              run_dir: Optional[Path] = None):
     """Write comparison results to CSV."""
-    output_dir = PROJECT_ROOT / "performance_results" / dataset
+    if run_dir is not None:
+        output_dir = run_dir / "tables"
+    else:
+        output_dir = PROJECT_ROOT / "performance_results" / dataset
     output_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = output_dir / f"comparison_runs_{timestamp}.csv"
+    output_path = output_dir / "summary.csv"
 
     fieldnames = [
         "scenario", "dataset", "description", "exit_code",
@@ -436,6 +426,142 @@ def write_comparison_results(results: list[dict], dataset: str):
 
     print(f"\nComparison results written to: {output_path}")
     return output_path
+
+
+def create_run_dir(dataset: str, tier: str) -> Path:
+    """Create a timestamped self-contained run folder with subfolders."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = PROJECT_ROOT / "performance_results" / dataset / "runs" / f"{timestamp}_{dataset}_{tier}"
+    for sub in ["figures", "tables", "traces", "solutions", "metadata", "configs"]:
+        (run_dir / sub).mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
+def post_process_scenario_outputs(run_dir: Path, scenario_name: str, config_path: Path):
+    """Move/rename C++ output files into the run folder's organized subfolders."""
+    # C++ writes directly into run_dir (thanks to --metrics_no_dataset_subdir).
+    # Files are named BilevelCND_{Approach}_{RunId}_{type}.csv/json
+
+    # Move trace CSV
+    for f in sorted(run_dir.glob("BilevelCND_*_quality_time.csv")):
+        dest = run_dir / "traces" / f"{scenario_name}_trace.csv"
+        shutil.move(str(f), str(dest))
+        break  # only the latest
+
+    # Move solution CSV
+    for f in sorted(run_dir.glob("BilevelCND_*_solution.csv")):
+        dest = run_dir / "solutions" / f"{scenario_name}_solution.csv"
+        shutil.move(str(f), str(dest))
+        break
+
+    # Move metadata JSON
+    for f in sorted(run_dir.glob("BilevelCND_*_metadata.json")):
+        dest = run_dir / "metadata" / f"{scenario_name}_metadata.json"
+        shutil.move(str(f), str(dest))
+        break
+
+    # Copy (not move) run_summary.csv — it's append-only across scenarios
+    summary_src = run_dir / "BilevelCND_run_summary.csv"
+    if summary_src.exists():
+        shutil.copy2(str(summary_src), str(run_dir / "metadata" / "run_summary.csv"))
+
+    # Copy scenario config
+    if config_path.exists():
+        shutil.copy2(str(config_path), str(run_dir / "configs" / f"{scenario_name}.ini"))
+
+
+def cleanup_run_dir_root(run_dir: Path):
+    """Remove leftover C++ output files from run_dir root after all scenarios."""
+    for pattern in ["BilevelCND_*_quality_time.csv", "BilevelCND_*_solution.csv",
+                     "BilevelCND_*_metadata.json", "BilevelCND_run_summary.csv"]:
+        for f in run_dir.glob(pattern):
+            f.unlink(missing_ok=True)
+
+
+def get_git_commit() -> str:
+    """Get current git commit hash, or 'unknown'."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=5,
+        )
+        return result.stdout.strip() if result.returncode == 0 else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def write_run_manifest(run_dir: Path, dataset: str, tier: str,
+                       results: list[dict], total_wall_seconds: float):
+    """Write machine-readable run_manifest.json."""
+    scenarios = []
+    for r in results:
+        entry = {
+            "name": r["scenario"],
+            "description": r["description"],
+            "exit_code": r["exit_code"],
+            "elapsed_seconds": round(r["elapsed_seconds"], 2),
+            "final_objective": r["final_objective"],
+            "final_budget": r["final_budget"],
+        }
+        trace = run_dir / "traces" / f"{r['scenario']}_trace.csv"
+        if trace.exists():
+            entry["trace"] = f"traces/{r['scenario']}_trace.csv"
+        solution = run_dir / "solutions" / f"{r['scenario']}_solution.csv"
+        if solution.exists():
+            entry["solution"] = f"solutions/{r['scenario']}_solution.csv"
+        scenarios.append(entry)
+
+    manifest = {
+        "timestamp": datetime.now().isoformat(),
+        "git_commit": get_git_commit(),
+        "platform": platform.platform(),
+        "dataset": dataset,
+        "tier": tier,
+        "total_wall_time_seconds": round(total_wall_seconds, 2),
+        "scenario_count": len(results),
+        "scenarios": scenarios,
+    }
+    manifest_path = run_dir / "run_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+    print(f"Manifest written to: {manifest_path}")
+
+
+def write_run_readme(run_dir: Path, dataset: str, tier: str, results: list[dict]):
+    """Write human-readable README.md summarizing the run."""
+    lines = [
+        f"# CNDP Comparison Run - {dataset}",
+        "",
+        f"- **Dataset**: {dataset}",
+        f"- **Tier**: {tier}",
+        f"- **Timestamp**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"- **Git commit**: {get_git_commit()}",
+        f"- **Scenarios**: {len(results)}",
+        "",
+        "## Results",
+        "",
+        "| Scenario | Status | Time (s) | Best Objective | Budget |",
+        "|----------|--------|----------|----------------|--------|",
+    ]
+    for r in results:
+        status = "OK" if r["exit_code"] == 0 else "FAILED"
+        obj = f"{r['final_objective']:.4f}" if r["final_objective"] is not None else "N/A"
+        budget = f"{r['final_budget']:.2f}" if r["final_budget"] is not None else "N/A"
+        lines.append(f"| {r['scenario']} | {status} | {r['elapsed_seconds']:.1f} | {obj} | {budget} |")
+
+    lines += [
+        "",
+        "## Folder Structure",
+        "",
+        "```",
+        "figures/    - All plots (PNG + PDF)",
+        "tables/     - Summary tables (CSV + LaTeX)",
+        "traces/     - Per-scenario iteration-level trace data",
+        "solutions/  - Per-scenario final link capacities",
+        "metadata/   - Per-scenario run metadata JSON",
+        "configs/    - Exact config files used (for reproducibility)",
+        "```",
+    ]
+    (run_dir / "README.md").write_text("\n".join(lines))
 
 
 def main():
@@ -549,6 +675,10 @@ def main():
             expanded_scenarios.append(s)
     scenarios_to_run = expanded_scenarios
 
+    # Create self-contained run folder
+    run_dir = create_run_dir(args.dataset, args.tier)
+    print(f"\nRun folder: {run_dir}")
+
     # Generate scenario configs
     print(f"Dataset: {args.dataset} (compute_scale: {DATASETS[args.dataset]['compute_scale']})")
     print(f"Tier: {args.tier}")
@@ -561,11 +691,15 @@ def main():
         print(f"  {i+1}. {s.name}{tag} - {s.description}")
         print(f"     Config: {config_path}")
 
+    wall_start = time.time()
     results = []
     for scenario in scenarios_to_run:
         time_limit = args.etalon_time_limit if scenario.is_etalon else args.scenario_time_limit
         config_path = scenario_configs[scenario.name]
-        result = run_scenario(args.dataset, scenario, config_path, time_limit=time_limit)
+        result = run_scenario(
+            args.dataset, scenario, config_path,
+            time_limit=time_limit, run_dir=run_dir,
+        )
         results.append(result)
 
         status = "OK" if result["exit_code"] == 0 else f"FAILED (exit={result['exit_code']})"
@@ -576,7 +710,35 @@ def main():
         if result["stderr_tail"]:
             print(f"  Stderr: {result['stderr_tail']}")
 
-    write_comparison_results(results, args.dataset)
+        # Post-process: move C++ outputs into organized subfolders
+        post_process_scenario_outputs(run_dir, scenario.name, config_path)
+
+    total_wall = time.time() - wall_start
+
+    # Clean up leftover root-level C++ files
+    cleanup_run_dir_root(run_dir)
+
+    # Copy base config for reproducibility
+    base_config_path = PROJECT_ROOT / DATASETS[args.dataset]["base_config"]
+    if base_config_path.exists():
+        shutil.copy2(str(base_config_path), str(run_dir / "configs" / "base_config.ini"))
+
+    # Write comparison results CSV into tables/
+    write_comparison_results(results, args.dataset, run_dir)
+
+    # Write manifest and README
+    write_run_manifest(run_dir, args.dataset, args.tier, results, total_wall)
+    write_run_readme(run_dir, args.dataset, args.tier, results)
+
+    # Generate comparison plots with --run-dir
+    plot_script = PROJECT_ROOT / "scripts" / "plot_cndp_comparison.py"
+    if plot_script.exists():
+        print(f"\nGenerating comparison plots...")
+        subprocess.run(
+            [sys.executable, str(plot_script), "--run-dir", str(run_dir),
+             "--dataset", args.dataset],
+            cwd=str(PROJECT_ROOT),
+        )
 
     # Print summary table
     print(f"\n{'='*90}")
@@ -586,9 +748,11 @@ def main():
     print(f"{'-'*30} {'-'*10} {'-'*10} {'-'*20} {'-'*15}")
     for r in results:
         status = "OK" if r["exit_code"] == 0 else "FAILED"
-        obj_str = f"{r['final_objective']:.6f}" if r["final_objective"] else "N/A"
-        budget_str = f"{r['final_budget']:.2f}" if r["final_budget"] else "N/A"
+        obj_str = f"{r['final_objective']:.6f}" if r["final_objective"] is not None else "N/A"
+        budget_str = f"{r['final_budget']:.2f}" if r["final_budget"] is not None else "N/A"
         print(f"{r['scenario']:<30} {status:<10} {r['elapsed_seconds']:<10.1f} {obj_str:<20} {budget_str:<15}")
+
+    print(f"\nSelf-contained run folder: {run_dir}")
 
 
 if __name__ == "__main__":

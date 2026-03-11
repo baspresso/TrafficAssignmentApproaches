@@ -46,20 +46,15 @@ matplotlib.rcParams.update({
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 SCENARIO_STYLES = {
+    "OptCond-only": {"color": "#d62728", "linestyle": "-", "linewidth": 2.0},
     "COBYLA-only": {"color": "#1f77b4", "linestyle": "-", "linewidth": 1.5},
     "BOBYQA-only": {"color": "#17becf", "linestyle": "-", "linewidth": 1.5},
-    "OptCond-only": {"color": "#d62728", "linestyle": "-", "linewidth": 2.0},
-    "COBYLA-then-OptCond": {"color": "#2ca02c", "linestyle": "-", "linewidth": 1.5},
-    "ISRES-then-OptCond": {"color": "#ff7f0e", "linestyle": "-", "linewidth": 1.5},
-    "BOBYQA-then-OptCond": {"color": "#9467bd", "linestyle": "-", "linewidth": 1.5},
-    "OptCond-then-COBYLA": {"color": "#8c564b", "linestyle": "-.", "linewidth": 1.5},
-    # OptimLib population-based metaheuristics
+    "ISRES-only": {"color": "#ff7f0e", "linestyle": "-", "linewidth": 1.5},
     "DE-only": {"color": "#e377c2", "linestyle": "-", "linewidth": 1.5},
     "PSO-only": {"color": "#7f7f7f", "linestyle": "-", "linewidth": 1.5},
-    "DE-PRMM-only": {"color": "#bcbd22", "linestyle": "-", "linewidth": 1.5},
-    "NM-only": {"color": "#aec7e8", "linestyle": "--", "linewidth": 1.5},
-    "DE-then-OptCond": {"color": "#e377c2", "linestyle": "--", "linewidth": 1.5},
-    "PSO-then-OptCond": {"color": "#7f7f7f", "linestyle": "--", "linewidth": 1.5},
+    "COBYLA-then-OptCond": {"color": "#2ca02c", "linestyle": "-", "linewidth": 1.5},
+    "OptCond-then-COBYLA": {"color": "#8c564b", "linestyle": "-.", "linewidth": 1.5},
+    "DE-then-OptCond": {"color": "#9467bd", "linestyle": "--", "linewidth": 1.5},
 }
 
 # Marker placed at each step switch point
@@ -118,6 +113,35 @@ def load_trace_files(dataset: str) -> dict[str, pd.DataFrame]:
                 traces[scenario_name] = df
         else:
             traces[scenario_name] = df
+
+    return traces
+
+
+def load_trace_files_from_run_dir(run_dir: Path) -> dict[str, pd.DataFrame]:
+    """Load trace CSVs from a self-contained run folder's traces/ subfolder."""
+    traces_dir = run_dir / "traces"
+    if not traces_dir.exists():
+        print(f"ERROR: Traces directory not found: {traces_dir}")
+        sys.exit(1)
+
+    traces = {}
+    for csv_path in sorted(traces_dir.glob("*_trace.csv")):
+        try:
+            df = pd.read_csv(csv_path)
+        except Exception as e:
+            print(f"WARNING: Failed to read {csv_path.name}: {e}")
+            continue
+        if df.empty:
+            continue
+
+        # Derive scenario name from filename: {ScenarioName}_trace.csv
+        scenario_name = csv_path.stem.replace("_trace", "")
+
+        # Ensure Scenario column is populated
+        if "Scenario" not in df.columns or df["Scenario"].isna().all():
+            df["Scenario"] = scenario_name
+
+        traces[scenario_name] = df
 
     return traces
 
@@ -387,7 +411,10 @@ def plot_optimality_gap_vs_evaluations(
     print(f"  Saved: gap_vs_evaluations_{dataset}")
 
 
-def plot_budget_utilization(traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Path):
+def plot_budget_utilization(
+    traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Path,
+    metadata_dir: Path | None = None,
+):
     """Plot 4: Budget utilization vs time.
 
     Shows how each method explores the feasibility region.
@@ -397,12 +424,20 @@ def plot_budget_utilization(traces: dict[str, pd.DataFrame], dataset: str, fig_d
 
     # Try to find budget upper bound from metadata
     budget_upper = None
-    trace_dir = PROJECT_ROOT / "performance_results" / dataset
-    for meta_path in trace_dir.glob("*_metadata.json"):
-        with open(meta_path) as f:
-            meta = json.load(f)
-        if "budget_upper_bound" in meta:
-            budget_upper = meta["budget_upper_bound"]
+    search_dirs = []
+    if metadata_dir is not None:
+        search_dirs.append(metadata_dir)
+    search_dirs.append(PROJECT_ROOT / "performance_results" / dataset)
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for meta_path in search_dir.glob("*_metadata.json"):
+            with open(meta_path) as f:
+                meta = json.load(f)
+            if "budget_upper_bound" in meta:
+                budget_upper = meta["budget_upper_bound"]
+                break
+        if budget_upper is not None:
             break
 
     if budget_upper is not None:
@@ -639,6 +674,280 @@ def plot_multi_run(traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Path)
     print(f"  Saved: multi_run_{dataset}")
 
 
+def plot_ta_compute_time(traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Path):
+    """Boxplot of TA computation time per scenario."""
+    plot_traces = exclude_etalon(traces)
+    data = []
+    labels = []
+    for scenario_name, df in sorted(plot_traces.items()):
+        if "TAComputeTime(s)" not in df.columns:
+            continue
+        vals = df["TAComputeTime(s)"].dropna()
+        if vals.empty:
+            continue
+        data.append(vals.values)
+        labels.append(scenario_name)
+
+    if not data:
+        print("  Skipping TA compute time plot (no data)")
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bp = ax.boxplot(data, labels=labels, patch_artist=True, vert=True)
+    for i, box in enumerate(bp["boxes"]):
+        style = get_style(labels[i])
+        box.set_facecolor(style.get("color", "gray"))
+        box.set_alpha(0.6)
+    ax.set_ylabel("TA Compute Time (s)")
+    ax.set_title(f"Traffic Assignment Compute Time per Scenario - {dataset}")
+    ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=9)
+    ax.grid(True, alpha=0.3, axis="y")
+    fig.tight_layout()
+
+    fig.savefig(fig_dir / "ta_compute_time.png")
+    fig.savefig(fig_dir / "ta_compute_time.pdf")
+    plt.close(fig)
+    print(f"  Saved: ta_compute_time")
+
+
+def plot_capacity_heatmap(dataset: str, fig_dir: Path, solutions_dir: Path):
+    """Heatmap: links (Y) x scenarios (X), color = capacity delta from lower bound."""
+    if not solutions_dir.exists():
+        return
+
+    solution_files = sorted(solutions_dir.glob("*_solution.csv"))
+    if not solution_files:
+        print("  Skipping capacity heatmap (no solution files)")
+        return
+
+    scenario_names = []
+    deltas = []
+    for f in solution_files:
+        try:
+            df = pd.read_csv(f)
+        except Exception:
+            continue
+        if df.empty or "optimized_capacity" not in df.columns or "lower_bound" not in df.columns:
+            continue
+        name = f.stem.replace("_solution", "")
+        scenario_names.append(name)
+        deltas.append((df["optimized_capacity"] - df["lower_bound"]).values)
+
+    if len(scenario_names) < 2:
+        print("  Skipping capacity heatmap (need >= 2 solutions)")
+        return
+
+    # Build matrix: rows=links, cols=scenarios
+    matrix = np.array(deltas).T  # shape: (n_links, n_scenarios)
+
+    # Only show links with non-trivial investment in at least one scenario
+    max_per_link = matrix.max(axis=1)
+    threshold = max_per_link.max() * 0.01
+    active_mask = max_per_link > threshold
+    if not active_mask.any():
+        return
+
+    matrix_filtered = matrix[active_mask]
+    link_indices = np.where(active_mask)[0]
+
+    fig, ax = plt.subplots(figsize=(max(8, len(scenario_names) * 1.2), max(6, len(link_indices) * 0.25)))
+    im = ax.imshow(matrix_filtered, aspect="auto", cmap="YlOrRd", interpolation="nearest")
+    ax.set_xticks(range(len(scenario_names)))
+    ax.set_xticklabels(scenario_names, rotation=45, ha="right", fontsize=8)
+    ax.set_ylabel("Link Index")
+    ax.set_yticks(range(len(link_indices)))
+    ax.set_yticklabels(link_indices, fontsize=7)
+    ax.set_title(f"Capacity Investment Heatmap - {dataset}")
+    fig.colorbar(im, ax=ax, label="Capacity - Lower Bound")
+    fig.tight_layout()
+
+    fig.savefig(fig_dir / "capacity_heatmap.png")
+    fig.savefig(fig_dir / "capacity_heatmap.pdf")
+    plt.close(fig)
+    print(f"  Saved: capacity_heatmap")
+
+
+def generate_capacity_comparison(tables_dir: Path, solutions_dir: Path):
+    """Merge all solution CSVs into wide-format capacity_comparison.csv."""
+    if not solutions_dir.exists():
+        return
+
+    solution_files = sorted(solutions_dir.glob("*_solution.csv"))
+    if not solution_files:
+        return
+
+    base_df = None
+    scenario_cols = {}
+    for f in solution_files:
+        try:
+            df = pd.read_csv(f)
+        except Exception:
+            continue
+        if df.empty or "optimized_capacity" not in df.columns:
+            continue
+        name = f.stem.replace("_solution", "")
+        if base_df is None:
+            base_cols = ["link_id", "init_node", "term_node", "lower_bound", "upper_bound"]
+            base_df = df[[c for c in base_cols if c in df.columns]].copy()
+        scenario_cols[f"{name}_capacity"] = df["optimized_capacity"].values
+        if "flow" in df.columns:
+            scenario_cols[f"{name}_flow"] = df["flow"].values
+
+    if base_df is None:
+        return
+
+    for col_name, values in scenario_cols.items():
+        base_df[col_name] = values
+
+    out_path = tables_dir / "capacity_comparison.csv"
+    base_df.to_csv(out_path, index=False, float_format="%.6f")
+    print(f"  Saved: capacity_comparison.csv")
+
+
+def generate_time_to_target(
+    traces: dict[str, pd.DataFrame], tables_dir: Path,
+    etalon_obj: float | None,
+):
+    """For each scenario, find time/evals to reach gap thresholds relative to etalon."""
+    if etalon_obj is None or not np.isfinite(etalon_obj) or etalon_obj <= 0:
+        return
+
+    thresholds = [0.05, 0.02, 0.01, 0.005]
+    plot_traces = exclude_etalon(traces)
+    rows = []
+    for scenario_name, df in sorted(plot_traces.items()):
+        feasible = filter_budget_feasible(df)
+        if feasible.empty:
+            rows.append({"Scenario": scenario_name})
+            continue
+
+        best_envelope = compute_best_so_far(feasible["Objective"])
+        gap = (best_envelope - etalon_obj) / etalon_obj
+        row = {"Scenario": scenario_name}
+        for thr in thresholds:
+            reached = gap <= thr
+            if reached.any():
+                first_idx = reached.idxmax()
+                row[f"Time_to_{thr*100:.1f}%"] = feasible.loc[first_idx, "ElapsedTime(s)"]
+                row[f"Evals_to_{thr*100:.1f}%"] = int(feasible.index.get_loc(first_idx) + 1)
+            else:
+                row[f"Time_to_{thr*100:.1f}%"] = np.nan
+                row[f"Evals_to_{thr*100:.1f}%"] = np.nan
+        rows.append(row)
+
+    if rows:
+        pd.DataFrame(rows).to_csv(
+            tables_dir / "time_to_target.csv", index=False, float_format="%.4f"
+        )
+        print(f"  Saved: time_to_target.csv")
+
+
+def generate_latex_summary(traces: dict[str, pd.DataFrame], tables_dir: Path):
+    """Write summary.tex with a LaTeX tabular from the summary data."""
+    plot_traces = exclude_etalon(traces)
+    rows = []
+    for scenario_name, df in sorted(plot_traces.items()):
+        feasible = filter_budget_feasible(df)
+        total_time = df["ElapsedTime(s)"].max() if not df.empty else 0
+        n_evals = len(df)
+        if not feasible.empty:
+            if "BestFeasibleObjective" in feasible.columns:
+                best_vals = feasible["BestFeasibleObjective"].dropna()
+                best_obj = best_vals.iloc[-1] if not best_vals.empty else np.nan
+            else:
+                best_obj = compute_best_so_far(feasible["Objective"]).iloc[-1]
+        else:
+            best_obj = np.nan
+        rows.append((scenario_name, best_obj, total_time, n_evals))
+
+    lines = [
+        r"\begin{table}[htbp]",
+        r"\centering",
+        r"\caption{CNDP Algorithm Comparison Summary}",
+        r"\label{tab:cndp-summary}",
+        r"\begin{tabular}{lrrr}",
+        r"\toprule",
+        r"Scenario & Best Objective & Time (s) & Evaluations \\",
+        r"\midrule",
+    ]
+    for name, obj, t, evals in rows:
+        obj_str = f"{obj:.2f}" if np.isfinite(obj) else "---"
+        # Escape underscores for LaTeX
+        latex_name = name.replace("_", r"\_")
+        lines.append(f"{latex_name} & {obj_str} & {t:.1f} & {evals} \\\\")
+    lines += [
+        r"\bottomrule",
+        r"\end{tabular}",
+        r"\end{table}",
+    ]
+    (tables_dir / "summary.tex").write_text("\n".join(lines))
+    print(f"  Saved: summary.tex")
+
+
+def generate_run_dir_readme(
+    run_dir: Path, dataset: str, traces: dict[str, pd.DataFrame],
+):
+    """Regenerate README.md in the run folder with updated metrics from plots."""
+    etalon_obj = get_etalon_best_objective(traces)
+    plot_traces = exclude_etalon(traces)
+
+    lines = [
+        f"# CNDP Comparison Results - {dataset}",
+        "",
+    ]
+
+    # Read manifest for metadata
+    manifest_path = run_dir / "run_manifest.json"
+    if manifest_path.exists():
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+        lines += [
+            f"- **Timestamp**: {manifest.get('timestamp', 'N/A')}",
+            f"- **Git commit**: {manifest.get('git_commit', 'N/A')}",
+            f"- **Platform**: {manifest.get('platform', 'N/A')}",
+            f"- **Total wall time**: {manifest.get('total_wall_time_seconds', 0):.1f}s",
+            "",
+        ]
+
+    if etalon_obj is not None and np.isfinite(etalon_obj):
+        lines.append(f"**Etalon reference objective**: {etalon_obj:.4f}")
+        lines.append("")
+
+    lines += [
+        "## Scenario Results",
+        "",
+        "| Scenario | Best Objective | Time (s) | Evaluations |",
+        "|----------|---------------|----------|-------------|",
+    ]
+    for scenario_name, df in sorted(plot_traces.items()):
+        feasible = filter_budget_feasible(df)
+        total_time = df["ElapsedTime(s)"].max() if not df.empty else 0
+        n_evals = len(df)
+        if not feasible.empty:
+            if "BestFeasibleObjective" in feasible.columns:
+                best_vals = feasible["BestFeasibleObjective"].dropna()
+                best_obj = best_vals.iloc[-1] if not best_vals.empty else np.nan
+            else:
+                best_obj = compute_best_so_far(feasible["Objective"]).iloc[-1]
+            obj_str = f"{best_obj:.4f}" if np.isfinite(best_obj) else "N/A"
+        else:
+            obj_str = "N/A"
+        lines.append(f"| {scenario_name} | {obj_str} | {total_time:.1f} | {n_evals} |")
+
+    lines += [
+        "",
+        "## Files",
+        "",
+        "- `figures/` - All plots (PNG + PDF)",
+        "- `tables/` - Summary tables (CSV + LaTeX)",
+        "- `traces/` - Per-scenario iteration trace data",
+        "- `solutions/` - Per-scenario final link capacities",
+        "- `metadata/` - Per-scenario metadata JSON files",
+        "- `configs/` - Exact config files used",
+    ]
+    (run_dir / "README.md").write_text("\n".join(lines))
+
+
 def plot_cross_dataset(
     all_traces: dict[str, dict[str, pd.DataFrame]],
     datasets: list[str],
@@ -774,7 +1083,7 @@ def generate_summary_table(
         })
 
     summary_df = pd.DataFrame(rows)
-    summary_path = fig_dir / f"summary_table_{dataset}.csv"
+    summary_path = fig_dir / "summary.csv"
     summary_df.to_csv(summary_path, index=False, float_format="%.6f")
 
     print(f"\n{'='*90}")
@@ -793,10 +1102,26 @@ def generate_summary_table(
     return summary_df
 
 
-def generate_single_dataset_plots(dataset: str, traces: dict[str, pd.DataFrame]):
-    """Generate all plots for a single dataset."""
-    fig_dir = PROJECT_ROOT / "performance_results" / dataset / "figures"
+def generate_single_dataset_plots(
+    dataset: str, traces: dict[str, pd.DataFrame],
+    run_dir: Path | None = None,
+):
+    """Generate all plots for a single dataset.
+
+    When run_dir is provided, outputs go to run_dir/figures/ and run_dir/tables/.
+    """
+    if run_dir is not None:
+        fig_dir = run_dir / "figures"
+        tables_dir = run_dir / "tables"
+        solutions_dir = run_dir / "solutions"
+        metadata_dir = run_dir / "metadata"
+    else:
+        fig_dir = PROJECT_ROOT / "performance_results" / dataset / "figures"
+        tables_dir = fig_dir
+        solutions_dir = None
+        metadata_dir = None
     fig_dir.mkdir(parents=True, exist_ok=True)
+    tables_dir.mkdir(parents=True, exist_ok=True)
 
     non_etalon = exclude_etalon(traces)
     if not non_etalon:
@@ -810,11 +1135,23 @@ def generate_single_dataset_plots(dataset: str, traces: dict[str, pd.DataFrame])
     plot_objective_vs_time(traces, dataset, fig_dir)
     plot_best_so_far(traces, dataset, fig_dir)
     plot_optimality_gap_vs_evaluations(traces, dataset, fig_dir)
-    plot_budget_utilization(traces, dataset, fig_dir)
+    plot_budget_utilization(traces, dataset, fig_dir, metadata_dir=metadata_dir)
     plot_convergence_character(traces, dataset, fig_dir)
+    plot_ta_compute_time(traces, dataset, fig_dir)
     plot_sensitivity_sweeps(traces, dataset, fig_dir)
     plot_multi_run(traces, dataset, fig_dir)
-    generate_summary_table(traces, dataset, fig_dir)
+
+    if solutions_dir is not None and solutions_dir.exists():
+        plot_capacity_heatmap(dataset, fig_dir, solutions_dir)
+        generate_capacity_comparison(tables_dir, solutions_dir)
+
+    etalon_obj = get_etalon_best_objective(traces)
+    generate_summary_table(traces, dataset, tables_dir)
+    generate_time_to_target(traces, tables_dir, etalon_obj)
+    generate_latex_summary(traces, tables_dir)
+
+    if run_dir is not None:
+        generate_run_dir_readme(run_dir, dataset, traces)
 
     print(f"\nAll figures saved to: {fig_dir}")
 
@@ -845,8 +1182,27 @@ def main():
         default=None,
         help="Override trace directory (default: performance_results/<dataset>)",
     )
+    parser.add_argument(
+        "--run-dir",
+        type=str,
+        default=None,
+        help="Self-contained run folder (loads from traces/, saves to figures/ and tables/)",
+    )
 
     args = parser.parse_args()
+
+    # Run-dir mode: self-contained folder
+    if args.run_dir:
+        run_dir = Path(args.run_dir)
+        dataset = args.dataset or "SiouxFalls"
+        print(f"Loading traces from run folder: {run_dir}")
+        traces = load_trace_files_from_run_dir(run_dir)
+        if not traces:
+            print("ERROR: No trace files found in run folder.")
+            sys.exit(1)
+        print(f"Found {len(traces)} scenario traces: {', '.join(sorted(traces.keys()))}")
+        generate_single_dataset_plots(dataset, traces, run_dir=run_dir)
+        return
 
     # Cross-dataset mode
     if args.datasets:
