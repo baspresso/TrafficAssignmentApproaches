@@ -90,9 +90,9 @@ def build_core_scenarios() -> list[Scenario]:
         # 0. Etalon — reference convergence baseline
         Scenario(
             name="Etalon",
-            description="Reference solution (COBYLA 5000)",
+            description="Reference solution (COBYLA 1000)",
             steps=[
-                StepConfig(type="nlopt", algorithm="LN_COBYLA", max_iterations=5000, tolerance=1e-4),
+                StepConfig(type="nlopt", algorithm="LN_COBYLA", max_iterations=1000, tolerance=1e-4),
             ],
             is_etalon=True,
             skip_scaling=True,

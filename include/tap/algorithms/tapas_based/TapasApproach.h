@@ -80,6 +80,7 @@ namespace TrafficAssignment {
     void Reset() override {
       TrafficAssignmentApproach<T>::Reset();
       ClearInternalState();
+      has_valid_state_ = false;
     }
 
     /**
@@ -90,13 +91,17 @@ namespace TrafficAssignment {
      * (< 0.1% improvement for 3 consecutive checks), restarts bush flows and PAS.
      */
     void ComputeTrafficFlows(bool statistics_recording = false) override {
-      this->network_.Reset();
-      ClearInternalState();
+      if (!has_valid_state_) {
+        // Cold start: zero everything and initialize via AON
+        this->network_.Reset();
+        ClearInternalState();
+        AllOrNothingAssignment();
+      } else {
+        // Warm start: keep bush flows + link flows, clear PAS + trees
+        ClearInternalState(/*preserve_bush_flows=*/true);
+      }
       if (statistics_recording) {
         this->statistics_recorder_.StartRecording(this->GetApproachName());
-      }
-      AllOrNothingAssignment();
-      if (statistics_recording) {
         this->statistics_recorder_.RecordStatistics();
       }
       T best_rgap = T(1);
@@ -123,6 +128,7 @@ namespace TrafficAssignment {
           }
         }
       }
+      has_valid_state_ = true;
     }
     
     std::string GetApproachName() override {
@@ -177,6 +183,8 @@ namespace TrafficAssignment {
     const T computation_threshold_ = 1e-10;
     static constexpr int max_hash_probes_ = 10000;
 
+    bool has_valid_state_ = false;
+
     /// @brief Priority queue of PAS ordered by cost difference (largest first).
     /// Entries may be stale (PAS eliminated); checked before processing.
     std::priority_queue <std::pair <T, int>> delta_pas_queue;
@@ -187,9 +195,11 @@ namespace TrafficAssignment {
     /// @brief Per-origin map from terminal link pair -> PAS hash (deduplication).
     std::vector <std::map <std::pair <int, int>, int>> origin_link_pair_pas_;
 
-    void ClearInternalState() {
+    void ClearInternalState(bool preserve_bush_flows = false) {
       for (int i = 0; i < number_of_origins_; i++) {
-        std::fill(bush_links_flows_[i].begin(), bush_links_flows_[i].end(), T(0));
+        if (!preserve_bush_flows) {
+          std::fill(bush_links_flows_[i].begin(), bush_links_flows_[i].end(), T(0));
+        }
         std::fill(origin_link_corresponding_pas_[i].begin(), origin_link_corresponding_pas_[i].end(), -1);
         origin_corresponding_pas_set_[i].clear();
         std::fill(links_origin_least_cost_routes_tree_[i].begin(), links_origin_least_cost_routes_tree_[i].end(), false);
