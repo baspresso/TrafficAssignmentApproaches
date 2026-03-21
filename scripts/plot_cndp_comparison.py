@@ -4,7 +4,7 @@ CNDP Algorithm Comparison - Analysis and Publication-Ready Plots
 Reads trace CSVs produced by run_cndp_comparison.py and generates:
 1. Objective vs Time - all scenarios overlaid (etalon as reference line)
 2. Best-so-far objective vs Time - monotonic envelope (etalon as reference line)
-3. Optimality gap vs TA evaluations (log scale)
+3. log10(best objective - etalon objective) vs TA evaluations
 4. Budget utilization vs time
 5. Per-iteration convergence character (side-by-side OptCond vs COBYLA)
 6. Sensitivity sweep plots (when sweep data exists)
@@ -46,19 +46,17 @@ matplotlib.rcParams.update({
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 SCENARIO_STYLES = {
-    "OptCond-only": {"color": "#d62728", "linestyle": "-", "linewidth": 2.0},
-    "COBYLA-only": {"color": "#1f77b4", "linestyle": "-", "linewidth": 1.5},
-    "BOBYQA-only": {"color": "#17becf", "linestyle": "-", "linewidth": 1.5},
-    "ISRES-only": {"color": "#ff7f0e", "linestyle": "-", "linewidth": 1.5},
-    "DE-only": {"color": "#e377c2", "linestyle": "-", "linewidth": 1.5},
-    "PSO-only": {"color": "#7f7f7f", "linestyle": "-", "linewidth": 1.5},
+    "OptCond": {"color": "#d62728", "linestyle": "-", "linewidth": 1.5},
+    "COBYLA": {"color": "#1f77b4", "linestyle": "-", "linewidth": 1.5},
+    "BOBYQA": {"color": "#17becf", "linestyle": "-", "linewidth": 1.5},
+    "GD": {"color": "#ff7f0e", "linestyle": "-", "linewidth": 1.5},
+    "DE": {"color": "#e377c2", "linestyle": "-", "linewidth": 1.5},
+    "PSO": {"color": "#7f7f7f", "linestyle": "-", "linewidth": 1.5},
     "COBYLA-then-OptCond": {"color": "#2ca02c", "linestyle": "-", "linewidth": 1.5},
     "OptCond-then-COBYLA": {"color": "#8c564b", "linestyle": "-.", "linewidth": 1.5},
     "DE-then-OptCond": {"color": "#9467bd", "linestyle": "--", "linewidth": 1.5},
+    #"GD": {"color": "#d62728", "linestyle": "-", "linewidth": 1.5},
 }
-
-# Marker placed at each step switch point
-SWITCH_MARKER = {"marker": "D", "markersize": 7, "zorder": 5}
 
 # Network sizes for cross-dataset plots
 NETWORK_LINKS = {"SiouxFalls": 76, "Anaheim": 914}
@@ -212,23 +210,6 @@ def compute_best_so_far(series: pd.Series) -> pd.Series:
     return best
 
 
-def find_step_switch_indices(df: pd.DataFrame) -> list[int]:
-    """Find row indices where the optimization step switches.
-
-    Detected by Phase column: a post_* row marks the end of a step.
-    The switch point is the post_* row itself (last point of the completed step).
-    """
-    if "Phase" not in df.columns:
-        return []
-
-    indices = []
-    phases = df["Phase"].values
-    for i, phase in enumerate(phases):
-        if isinstance(phase, str) and phase.startswith("post_"):
-            indices.append(i)
-    return indices
-
-
 def get_style(scenario_name: str) -> dict:
     """Get plot style for a scenario."""
     return SCENARIO_STYLES.get(scenario_name, {
@@ -275,19 +256,6 @@ def plot_objective_vs_time(traces: dict[str, pd.DataFrame], dataset: str, fig_di
             **style,
         )
 
-        # Mark step switches
-        switch_indices = find_step_switch_indices(df)
-        feasible_idx_set = set(feasible.index)
-        for idx in switch_indices:
-            if idx in feasible_idx_set:
-                row = df.loc[idx]
-                ax.plot(
-                    row["ElapsedTime(s)"],
-                    row["Objective"],
-                    color=style.get("color", "gray"),
-                    **SWITCH_MARKER,
-                )
-
     ax.set_xlabel("Elapsed Time (s)")
     ax.set_ylabel("Objective Function")
     ax.set_title(f"CNDP Objective vs Time - {dataset}")
@@ -323,19 +291,6 @@ def plot_best_so_far(traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Pat
             **style,
         )
 
-        # Mark step switches on the envelope
-        switch_indices = find_step_switch_indices(df)
-        feasible_idx_set = set(feasible.index)
-        for idx in switch_indices:
-            if idx in feasible_idx_set:
-                pos = feasible.index.get_loc(idx)
-                ax.plot(
-                    feasible["ElapsedTime(s)"].iloc[pos],
-                    best_envelope.iloc[pos],
-                    color=style.get("color", "gray"),
-                    **SWITCH_MARKER,
-                )
-
     ax.set_xlabel("Elapsed Time (s)")
     ax.set_ylabel("Best Feasible Objective")
     ax.set_title(f"Best-So-Far Objective vs Time - {dataset}")
@@ -351,10 +306,9 @@ def plot_best_so_far(traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Pat
 def plot_optimality_gap_vs_evaluations(
     traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Path
 ):
-    """Plot 3: Optimality gap vs TA evaluations (log scale).
+    """Plot 3: log10(best objective - etalon objective) vs TA evaluations.
 
-    Y-axis: log10((Z - Z_etalon) / Z_etalon). Decouples algorithm efficiency
-    from per-evaluation cost.
+    Decouples algorithm efficiency from per-evaluation cost.
     """
     etalon_obj = get_etalon_best_objective(traces)
     if etalon_obj is None or not np.isfinite(etalon_obj) or etalon_obj <= 0:
@@ -370,7 +324,7 @@ def plot_optimality_gap_vs_evaluations(
             continue
 
         best_envelope = compute_best_so_far(feasible["Objective"])
-        gap = (best_envelope - etalon_obj) / etalon_obj
+        gap = best_envelope - etalon_obj
         # Only plot positive gaps (log scale)
         valid = gap > 0
         if not valid.any():
@@ -385,23 +339,9 @@ def plot_optimality_gap_vs_evaluations(
             **style,
         )
 
-        # Mark step switches
-        switch_indices = find_step_switch_indices(df)
-        feasible_idx_set = set(feasible.index)
-        for idx in switch_indices:
-            if idx in feasible_idx_set:
-                pos = feasible.index.get_loc(idx)
-                if valid.iloc[pos]:
-                    ax.plot(
-                        pos,
-                        np.log10(gap.iloc[pos]),
-                        color=style.get("color", "gray"),
-                        **SWITCH_MARKER,
-                    )
-
     ax.set_xlabel("TA Evaluations (cumulative)")
-    ax.set_ylabel(r"$\log_{10}$ Optimality Gap $(Z^* - Z_{etalon}) / Z_{etalon}$")
-    ax.set_title(f"Optimality Gap vs TA Evaluations - {dataset}")
+    ax.set_ylabel(r"$\log_{10}(\mathrm{Best\ objective} - \mathrm{Etalon\ objective})$")
+    ax.set_title(f"Objective Gap vs TA Evaluations - {dataset}")
     ax.legend(loc="upper right")
     ax.grid(True, alpha=0.3)
 
@@ -409,6 +349,93 @@ def plot_optimality_gap_vs_evaluations(
     fig.savefig(fig_dir / f"gap_vs_evaluations_{dataset}.pdf")
     plt.close(fig)
     print(f"  Saved: gap_vs_evaluations_{dataset}")
+
+
+def plot_absolute_gap_vs_time(
+    traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Path
+):
+    """Plot log10(best objective - etalon objective) vs elapsed time."""
+    etalon_obj = get_etalon_best_objective(traces)
+    if etalon_obj is None or not np.isfinite(etalon_obj) or etalon_obj <= 0:
+        print("  Skipping objective gap vs time plot (no etalon reference)")
+        return
+
+    plot_traces = exclude_etalon(traces)
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    for scenario_name, df in sorted(plot_traces.items()):
+        feasible = filter_budget_feasible(df)
+        if feasible.empty:
+            continue
+
+        best_envelope = compute_best_so_far(feasible["Objective"])
+        gap = best_envelope - etalon_obj
+        valid = gap > 0
+        if not valid.any():
+            continue
+
+        style = get_style(scenario_name)
+        ax.plot(
+            feasible["ElapsedTime(s)"][valid],
+            np.log10(gap[valid]),
+            label=scenario_name,
+            **style,
+        )
+
+    ax.set_xlabel("Elapsed Time (s)")
+    ax.set_ylabel(r"$\log_{10}(\mathrm{Best\ objective} - \mathrm{Etalon\ objective})$")
+    ax.set_title(f"Objective Gap vs Time - {dataset}")
+    ax.legend(loc="upper right")
+    ax.grid(True, alpha=0.3)
+
+    fig.savefig(fig_dir / f"absolute_gap_vs_time_{dataset}.png")
+    fig.savefig(fig_dir / f"absolute_gap_vs_time_{dataset}.pdf")
+    plt.close(fig)
+    print(f"  Saved: absolute_gap_vs_time_{dataset}")
+
+
+def plot_absolute_gap_vs_evaluations(
+    traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Path
+):
+    """Plot log10(best objective - etalon objective) vs cumulative TA evaluations."""
+    etalon_obj = get_etalon_best_objective(traces)
+    if etalon_obj is None or not np.isfinite(etalon_obj) or etalon_obj <= 0:
+        print("  Skipping objective gap vs evaluations plot (no etalon reference)")
+        return
+
+    plot_traces = exclude_etalon(traces)
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    for scenario_name, df in sorted(plot_traces.items()):
+        feasible = filter_budget_feasible(df)
+        if feasible.empty:
+            continue
+
+        best_envelope = compute_best_so_far(feasible["Objective"])
+        gap = best_envelope - etalon_obj
+        valid = gap > 0
+        if not valid.any():
+            continue
+
+        eval_idx = np.arange(len(feasible))
+        style = get_style(scenario_name)
+        ax.plot(
+            eval_idx[valid],
+            np.log10(gap[valid]),
+            label=scenario_name,
+            **style,
+        )
+
+    ax.set_xlabel("TA Evaluations (cumulative)")
+    ax.set_ylabel(r"$\log_{10}(\mathrm{Best\ objective} - \mathrm{Etalon\ objective})$")
+    ax.set_title(f"Objective Gap vs TA Evaluations - {dataset}")
+    ax.legend(loc="upper right")
+    ax.grid(True, alpha=0.3)
+
+    fig.savefig(fig_dir / f"absolute_gap_vs_evaluations_{dataset}.png")
+    fig.savefig(fig_dir / f"absolute_gap_vs_evaluations_{dataset}.pdf")
+    plt.close(fig)
+    print(f"  Saved: absolute_gap_vs_evaluations_{dataset}")
 
 
 def plot_budget_utilization(
@@ -1135,6 +1162,8 @@ def generate_single_dataset_plots(
     plot_objective_vs_time(traces, dataset, fig_dir)
     plot_best_so_far(traces, dataset, fig_dir)
     plot_optimality_gap_vs_evaluations(traces, dataset, fig_dir)
+    plot_absolute_gap_vs_time(traces, dataset, fig_dir)
+    plot_absolute_gap_vs_evaluations(traces, dataset, fig_dir)
     plot_budget_utilization(traces, dataset, fig_dir, metadata_dir=metadata_dir)
     plot_convergence_character(traces, dataset, fig_dir)
     plot_ta_compute_time(traces, dataset, fig_dir)

@@ -47,8 +47,7 @@ namespace TrafficAssignment {
       if (direction) {
         delta = std::min(total_flow.first, delta);
         return {-delta, delta};
-      }
-      else {
+      } else {
         delta = std::min(total_flow.second, delta);
         return {delta, -delta};
       }

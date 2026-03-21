@@ -9,6 +9,7 @@
 #include "steps/NloptOptimizationStep.h"
 #include "steps/OptimalityConditionStep.h"
 #include "steps/OptimlibOptimizationStep.h"
+#include "steps/GradientDescentStep.h"
 
 namespace TrafficAssignment {
 
@@ -19,6 +20,7 @@ namespace TrafficAssignment {
  * - "nlopt" -> NloptOptimizationStep (derivative-free: COBYLA, BOBYQA, ISRES, ...)
  * - "optimality_condition" -> OptimalityConditionStep (sensitivity-based, Chiou 2005)
  * - "optimlib" -> OptimlibOptimizationStep (population-based: DE, PSO, NM, ...)
+ * - "gradient_descent" -> GradientDescentStep (projected GD with finite-difference gradients)
  *
  * @tparam T Numeric type for flow/capacity computations.
  */
@@ -39,6 +41,9 @@ public:
     }
     if (type == "optimlib") {
       return std::make_unique<OptimlibOptimizationStep<T>>(config);
+    }
+    if (type == "gradient_descent") {
+      return std::make_unique<GradientDescentStep<T>>(config);
     }
     throw std::runtime_error("Unknown optimization step type: '" + config.type + "'");
   }

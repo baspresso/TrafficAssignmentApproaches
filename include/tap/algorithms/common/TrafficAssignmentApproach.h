@@ -49,6 +49,12 @@ namespace TrafficAssignment {
       return 1;
     }
 
+    /// @brief Ensures routes are available for sensitivity-based gradient computation.
+    /// RouteBased: no-op (routes maintained by column generation).
+    /// TAPAS: extracts paths from bush DAGs via DFS.
+    virtual void PopulateRoutes() {}
+
+
     void SetOutputRoot(const std::string& root) {
       statistics_recorder_.SetOutputRoot(root);
     }

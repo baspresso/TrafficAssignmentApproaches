@@ -9,6 +9,7 @@
 #include "components/TapasNewtonStepShiftMethod.h"
 #include "components/TapasLineSearchShiftMethod.h"
 #include "components/TapasAdvancedGradientDescentShiftMethod.h"
+#include "components/TapasBisectionShiftMethod.h"
 
 namespace TrafficAssignment {
 
@@ -38,7 +39,8 @@ public:
     
   void RegisterAll() {
     REGISTER_TAPAS_SHIFT_METHOD("NewtonStep", TapasNewtonStepShiftMethod);
-    REGISTER_TAPAS_SHIFT_METHOD("LineSearch", TapasLineSearchShiftMethod);    
+    REGISTER_TAPAS_SHIFT_METHOD("LineSearch", TapasLineSearchShiftMethod);
+    REGISTER_TAPAS_SHIFT_METHOD("Bisection", TapasBisectionShiftMethod);
   }
     
   void Register(const std::string& name, Creator creator) {

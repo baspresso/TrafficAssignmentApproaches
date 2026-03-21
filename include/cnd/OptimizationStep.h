@@ -25,6 +25,12 @@ struct OptimizationStepConfig {
 
   // Population-based (OptimLib) specific
   int population_size = 0;  ///< Population size for DE/PSO (0 = auto: max(200, 2*n_vars)).
+
+  // Gradient descent specific
+  double step_size = 1.0;    ///< Initial step size for gradient descent (Armijo starting alpha).
+  double fd_epsilon = 1e-4;  ///< Finite difference perturbation size for gradient estimation.
+  std::string gradient_method;  ///< Gradient estimator: "finite_difference" (default), "spsa", "sensitivity".
+  std::string stochastic_optimizer;  ///< Optimizer for stochastic gradient: "sgd" (default), "momentum", "adam".
 };
 
 /**

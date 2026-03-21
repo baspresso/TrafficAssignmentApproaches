@@ -12,12 +12,13 @@
 #include <boost/multiprecision/cpp_dec_float.hpp>
 #include "../OptimizationStep.h"
 #include "../CndOptimizationContext.h"
+#include "../sensitivity/OptimalitySensitivity.h"
 #include "../../tap/data/Link.h"
 
 namespace TrafficAssignment {
 
 namespace mp_internal = boost::multiprecision;
-using high_prec_internal = mp_internal::cpp_dec_float_50;
+using high_prec_internal = long double;
 
 /**
  * @brief Sensitivity-analysis-based optimization step using first-order optimality conditions.
@@ -68,6 +69,25 @@ public:
     progress.Start(config_.max_iterations);
 
     try {
+      // Record initial state before any iterations
+      {
+        double ta_compute_seconds = 0.0;
+        if (!ctx.ComputeTrafficFlowsSafely(ta_compute_seconds, "optcond_init")) {
+          throw std::runtime_error("TA computation failed during optimality condition initialization.");
+        }
+        double total_travel_time = ctx.network.TotalTravelTime();
+        double budget_function = static_cast<double>(ctx.Budget());
+        double objective_function = total_travel_time + budget_function;
+        ctx.counters.optcond_trace_step = 0;
+        ctx.UpdateRuntimeAndBudgetMetrics(ta_compute_seconds, budget_function);
+        ctx.LogQualityTimePoint("optcond_init",
+                                0,
+                                objective_function,
+                                total_travel_time,
+                                budget_function,
+                                ta_compute_seconds);
+      }
+
       for (int cnt = 0; cnt < config_.max_iterations; cnt++) {
         if (ctx.Budget() < ctx.budget_upper_bound - ctx.budget_threshold) {
           NonUpperBoundBudgetOptimalityIteration(ctx);
@@ -131,157 +151,21 @@ public:
 
 private:
   OptimizationStepConfig config_;
+  OptimalitySensitivity<T> sensitivity_;
 
-  // --- Optimality math ---
+  // Type aliases for the shared OdCache
+  using OdCache = typename OptimalitySensitivity<T>::OdCache;
 
-  /**
-   * @brief Cached per-OD-pair data for efficient optimality function evaluation.
-   *
-   * Precomputes the route cost Jacobian inverse, the all-ones column eT*J^{-1}*e denominator,
-   * and route-link membership sets. This avoids redundant matrix inversions when evaluating
-   * phi_a across all design links.
-   */
-  struct OdCache {
-    std::vector<std::vector<int>> routes;            ///< Route definitions (list of link IDs per route).
-    MatrixHightPrecision          jacobi_inverse;    ///< J^{-1}: inverse of route cost Jacobian (high precision).
-    MatrixHightPrecision          e_col;             ///< e: all-ones column vector (R x 1).
-    MatrixHightPrecision          inv_transpose_e;   ///< J^{-1}^T * e: precomputed for O(R) dot product.
-    high_prec_internal            denominator;       ///< eT * J^{-1} * e: shared denominator for all links.
-    T                             demand;            ///< OD pair demand d_w.
-    std::vector<std::unordered_set<int>> route_link_sets; ///< route_link_sets[r] = {link IDs in route r} for O(1) lookup.
-    bool                          valid = false;     ///< False if Jacobian is near-singular.
-  };
-
-  /// @brief Builds the dc_a/dy_a column: partial derivative of route costs w.r.t. capacity of link_index.
-  ///        Non-zero only for routes containing the link. Chiou (2005) Eq. 6.
-  MatrixXd CapacityDerColumn(CndOptimizationContext<T>& ctx,
-                             const std::vector<std::vector<int>>& routes,
-                             int link_index) {
-    MatrixXd res = MatrixXd::Constant(routes.size(), 1, 0.0);
-    for (std::size_t i = 0; i < routes.size(); i++) {
-      if (std::find(routes[i].begin(), routes[i].end(), link_index) != routes[i].end()) {
-        res(i, 0) = ctx.network.links()[link_index].DelayCapacityDer();
-      }
-    }
-    return res;
-  }
-
-  /// @brief Fast dc_a/dy_a column using precomputed route-link membership sets from OdCache.
-  MatrixXd CapacityDerColumnCached(CndOptimizationContext<T>& ctx,
-                                    const OdCache& cache,
-                                    int link_index) {
-    MatrixXd res = MatrixXd::Constant(cache.routes.size(), 1, 0.0);
-    T delay_cap_der = ctx.network.links()[link_index].DelayCapacityDer();
-    for (std::size_t i = 0; i < cache.routes.size(); i++) {
-      if (cache.route_link_sets[i].count(link_index)) {
-        res(i, 0) = delay_cap_der;
-      }
-    }
-    return res;
-  }
-
-  MatrixHightPrecision ConvertEigenMatrix(const MatrixXd& source) {
-    MatrixHightPrecision target(source.rows(), source.cols());
-    for (int i = 0; i < source.rows(); ++i) {
-      for (int j = 0; j < source.cols(); ++j) {
-        target(i, j) = static_cast<high_prec_internal>(source(i, j));
-      }
-    }
-    return target;
-  }
-
-  /**
-   * @brief Computes the optimality function phi_a for a single link. Chiou (2005) Eq. 9.
-   *
-   * phi_a = (1/theta) * sum_w d_w * (eT J_w^{-1} dc_a) / (eT J_w^{-1} e)
-   *
-   * At optimality, phi_a should be equal across all active design links (KKT condition).
-   * This is the non-cached version that rebuilds the Jacobian from scratch.
-   */
-  T OptimalityFunction(CndOptimizationContext<T>& ctx,
-                        int link_index,
-                        bool flow_computation = true) {
-    if (flow_computation) {
-      double ta_compute_seconds = 0.0;
-      if (!ctx.ComputeTrafficFlowsSafely(ta_compute_seconds, "optimality_function")) {
-        return ctx.NaNValue();
-      }
-    }
-    T result = 0;
-    for (int od_pair_index = 0; od_pair_index < ctx.network.number_of_od_pairs(); od_pair_index++) {
-      const int routes_count = ctx.network.mutable_od_pairs()[od_pair_index].GetRoutesCount();
-      if (routes_count <= 0) continue;
-      auto routes = ctx.network.mutable_od_pairs()[od_pair_index].GetRoutes();
-      auto e_column = MatrixHightPrecision::Constant(routes_count, 1, 1.0);
-      auto jacobi = ConvertEigenMatrix(RoutesJacobiMatrix(routes, ctx.network.mutable_links()));
-      auto capacity_der_column = ConvertEigenMatrix(CapacityDerColumn(ctx, routes, link_index));
-      auto jacobi_inverse = jacobi.inverse();
-      const auto numerator = (e_column.transpose() * jacobi_inverse * capacity_der_column)(0, 0);
-      const auto denominator = (e_column.transpose() * jacobi_inverse * e_column)(0, 0);
-      if (mp_internal::abs(denominator) <
-          static_cast<high_prec_internal>(CndOptimizationContext<T>::kDenominatorZeroGuard)) {
-        return ctx.NaNValue();
-      }
-      const T local_value = static_cast<T>(-numerator / denominator);
-      if (!ctx.IsFiniteScalar(local_value)) return ctx.NaNValue();
-      result += ctx.network.od_pairs()[od_pair_index].GetDemand() * local_value;
-    }
-    result /= ctx.budget_function_multiplier;
-    if (!ctx.IsFiniteScalar(result)) return ctx.NaNValue();
-    return result;
-  }
-
-  /// @brief Builds the OD cache for all OD pairs: precomputes Jacobian inverses and denominators.
+  /// @brief Delegates to shared sensitivity math.
   std::vector<OdCache> BuildOdCache(CndOptimizationContext<T>& ctx) {
-    const int n_od = ctx.network.number_of_od_pairs();
-    std::vector<OdCache> od_cache(n_od);
-    for (int od = 0; od < n_od; ++od) {
-      const int rc = ctx.network.mutable_od_pairs()[od].GetRoutesCount();
-      if (rc <= 0) continue;
-      OdCache& c = od_cache[od];
-      c.routes  = ctx.network.mutable_od_pairs()[od].GetRoutes();
-      c.demand  = ctx.network.od_pairs()[od].GetDemand();
-      c.e_col   = MatrixHightPrecision::Constant(rc, 1, high_prec_internal(1));
-
-      // Build route-link membership sets for O(1) lookup
-      c.route_link_sets.resize(rc);
-      for (int r = 0; r < rc; ++r) {
-        c.route_link_sets[r].insert(c.routes[r].begin(), c.routes[r].end());
-      }
-
-      auto jacobi_hp = ConvertEigenMatrix(
-          RoutesJacobiMatrix(c.routes, ctx.network.mutable_links()));
-      c.jacobi_inverse = jacobi_hp.inverse();
-      c.denominator    = (c.e_col.transpose() * c.jacobi_inverse * c.e_col)(0, 0);
-      if (mp_internal::abs(c.denominator) <
-          static_cast<high_prec_internal>(CndOptimizationContext<T>::kDenominatorZeroGuard)) {
-        continue;
-      }
-      // Precompute J⁻¹ᵀ * e for O(R) dot product in OptimalityFunctionFromCache
-      c.inv_transpose_e = c.jacobi_inverse.transpose() * c.e_col;
-      c.valid = true;
-    }
-    return od_cache;
+    return sensitivity_.BuildOdCache(ctx);
   }
 
-  /// @brief Computes phi_a using precomputed OdCache (avoids redundant Jacobian inversions).
+  /// @brief Delegates to shared sensitivity math.
   T OptimalityFunctionFromCache(CndOptimizationContext<T>& ctx,
                                  int link_index,
                                  const std::vector<OdCache>& od_cache) {
-    T result = T(0);
-    for (const OdCache& c : od_cache) {
-      if (!c.valid) continue;
-      auto cap_der = ConvertEigenMatrix(CapacityDerColumnCached(ctx, c, link_index));
-      // Use precomputed inv_transpose_e for O(R) dot product instead of O(R²) matrix-vector multiply
-      // numerator = eᵀ * J⁻¹ * cap_der = (J⁻¹ᵀ * e)ᵀ * cap_der = inv_transpose_eᵀ * cap_der
-      const high_prec_internal numerator =
-          (c.inv_transpose_e.transpose() * cap_der)(0, 0);
-      const T local_value = static_cast<T>(-numerator / c.denominator);
-      if (!ctx.IsFiniteScalar(local_value)) return ctx.NaNValue();
-      result += c.demand * local_value;
-    }
-    result /= ctx.budget_function_multiplier;
-    return ctx.IsFiniteScalar(result) ? result : ctx.NaNValue();
+    return sensitivity_.OptimalityFunctionFromCache(ctx, link_index, od_cache);
   }
 
   // --- Upper-bound budget optimality iteration (budget exhausted) ---

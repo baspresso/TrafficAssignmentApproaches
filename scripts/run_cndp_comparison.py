@@ -43,6 +43,10 @@ class StepConfig:
     max_iterations: int = 100
     tolerance: float = 1e-4
     population_size: int = 0  # optimlib-specific: 0 = auto
+    step_size: float = 1.0    # gradient_descent-specific: Armijo starting alpha
+    fd_epsilon: float = 1e-4  # gradient_descent-specific: finite difference perturbation
+    gradient_method: str = ""  # gradient_descent-specific: finite_difference, spsa, sensitivity
+    stochastic_optimizer: str = ""  # gradient_descent-specific: sgd (default), momentum, adam
 
 
 @dataclass
@@ -65,6 +69,11 @@ DATASETS = {
         "budget_multiplier": 2,
         "compute_scale": 0.5,
     },
+    "Barcelona": {
+        "base_config": "configs/cnd.barcelona.ini",
+        "budget_multiplier": 0.0001,
+        "compute_scale": 1.0,
+    },
 }
 
 
@@ -79,6 +88,10 @@ def _scale_iterations(steps: list[StepConfig], scale: float) -> list[StepConfig]
             max_iterations=max(1, math.ceil(s.max_iterations * scale)),
             tolerance=s.tolerance,
             population_size=s.population_size,
+            step_size=s.step_size,
+            fd_epsilon=s.fd_epsilon,
+            gradient_method=s.gradient_method,
+            stochastic_optimizer=s.stochastic_optimizer,
         )
         for s in steps
     ]
@@ -99,7 +112,7 @@ def build_core_scenarios() -> list[Scenario]:
         ),
         # 1. OptCond-only — proposed method
         Scenario(
-            name="OptCond-only",
+            name="OptCond",
             description="Proposed optimality condition method (35 iters)",
             steps=[
                 StepConfig(type="optimality_condition", max_iterations=35),
@@ -107,71 +120,47 @@ def build_core_scenarios() -> list[Scenario]:
         ),
         # 2. COBYLA-only — popular derivative-free constrained optimizer
         Scenario(
-            name="COBYLA-only",
-            description="NLopt COBYLA (500 iters)",
+            name="COBYLA",
+            description="NLopt COBYLA (50 iters)",
             steps=[
-                StepConfig(type="nlopt", algorithm="LN_COBYLA", max_iterations=500, tolerance=1e-4),
+                StepConfig(type="nlopt", algorithm="LN_COBYLA", max_iterations=50, tolerance=1e-4),
             ],
         ),
         # 3. BOBYQA-only — quadratic model (penalty-based constraints)
+        # Scenario(
+        #     name="BOBYQA",
+        #     description="NLopt BOBYQA (2500 iters)",
+        #     steps=[
+        #         StepConfig(type="nlopt", algorithm="LN_BOBYQA", max_iterations=2500, tolerance=1e-4),
+        #     ],
+        # ),
+        #10. GD-only — projected gradient descent with finite-difference gradients
+        # Scenario(
+        #     name="GD",
+        #     description="Gradient descent (40 iters)",
+        #     steps=[
+        #         StepConfig(type="gradient_descent", max_iterations=30   , tolerance=1e-10,
+        #                    step_size=10.0, fd_epsilon=1e-3),
+        #     ],
+        # ),
+        # 11. GD-SPSA — gradient descent with SPSA gradient estimation (2 evals/iter)
         Scenario(
-            name="BOBYQA-only",
-            description="NLopt BOBYQA (500 iters)",
+            name="GD-SPSA",
+            description="Gradient descent with SPSA (300 iters)",
             steps=[
-                StepConfig(type="nlopt", algorithm="LN_BOBYQA", max_iterations=500, tolerance=1e-4),
+                StepConfig(type="gradient_descent", max_iterations=300, tolerance=1e-10,
+                           step_size=0.1, fd_epsilon=0.05, gradient_method="spsa"),
             ],
         ),
-        # 4. ISRES-only — evolutionary strategy with constraint ranking
-        Scenario(
-            name="ISRES-only",
-            description="NLopt global ISRES (500 iters)",
-            steps=[
-                StepConfig(type="nlopt", algorithm="GN_ISRES", max_iterations=500, tolerance=1e-4),
-            ],
-        ),
-        # 5. DE-only — Differential Evolution
-        Scenario(
-            name="DE-only",
-            description="OptimLib Differential Evolution (2 gens, pop=100)",
-            steps=[
-                StepConfig(type="optimlib", algorithm="DE", max_iterations=2, population_size=100),
-            ],
-        ),
-        # 6. PSO-only — Particle Swarm
-        Scenario(
-            name="PSO-only",
-            description="OptimLib Particle Swarm (3 gens, pop=100)",
-            steps=[
-                StepConfig(type="optimlib", algorithm="PSO", max_iterations=3, population_size=100),
-            ],
-        ),
-        # 7. COBYLA→OptCond — OptCond as refinement
-        Scenario(
-            name="COBYLA-then-OptCond",
-            description="COBYLA 200 + OptCond 10",
-            steps=[
-                StepConfig(type="nlopt", algorithm="LN_COBYLA", max_iterations=200, tolerance=1e-4),
-                StepConfig(type="optimality_condition", max_iterations=10),
-            ],
-        ),
-        # 8. OptCond→COBYLA — OptCond as warm-start
-        Scenario(
-            name="OptCond-then-COBYLA",
-            description="OptCond 15 + COBYLA 200",
-            steps=[
-                StepConfig(type="optimality_condition", max_iterations=15),
-                StepConfig(type="nlopt", algorithm="LN_COBYLA", max_iterations=200, tolerance=1e-4),
-            ],
-        ),
-        # 9. DE→OptCond — OptCond refining metaheuristic
-        Scenario(
-            name="DE-then-OptCond",
-            description="DE 1 gen (pop=100) + OptCond 10",
-            steps=[
-                StepConfig(type="optimlib", algorithm="DE", max_iterations=1, population_size=100),
-                StepConfig(type="optimality_condition", max_iterations=10),
-            ],
-        ),
+        # 12. GD-Sensitivity — gradient descent with analytical sensitivity gradient
+        # Scenario(
+        #     name="GD-Sensitivity",
+        #     description="Gradient descent with sensitivity (80 iters)",
+        #     steps=[
+        #         StepConfig(type="gradient_descent", max_iterations=80, tolerance=1e-4,
+        #                    step_size=5.0, fd_epsilon=1e-3, gradient_method="sensitivity"),
+        #     ],
+        # ),
     ]
 
 
@@ -295,10 +284,17 @@ def generate_scenario_config(
         if step.algorithm:
             lines.append(f"algorithm = {step.algorithm}")
         lines.append(f"max_iterations = {step.max_iterations}")
-        if step.type == "nlopt":
+        if step.type in ("nlopt", "gradient_descent"):
             lines.append(f"tolerance = {step.tolerance}")
         if step.population_size > 0:
             lines.append(f"population_size = {step.population_size}")
+        if step.type == "gradient_descent":
+            lines.append(f"step_size = {step.step_size}")
+            lines.append(f"fd_epsilon = {step.fd_epsilon}")
+            if step.gradient_method:
+                lines.append(f"gradient_method = {step.gradient_method}")
+            if step.stochastic_optimizer:
+                lines.append(f"stochastic_optimizer = {step.stochastic_optimizer}")
         lines.append("")
 
     config_path.write_text("\n".join(lines))

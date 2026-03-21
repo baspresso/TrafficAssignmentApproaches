@@ -41,6 +41,9 @@ namespace TrafficAssignment {
 
     T flow = 0; ///< Current traffic flow on the link (vehicles/hour).
 
+    mutable T cached_der_ = T(-1);        ///< Cached DelayDer() value.
+    mutable T cached_der_flow_ = T(-1);   ///< Flow at which cached_der_ was computed.
+
     /**
      * @brief Constructs a Link object with given parameters.
      * @param init Source node ID.
@@ -144,15 +147,27 @@ namespace TrafficAssignment {
       if (temp_flow == -1) {
         temp_flow = flow;
       }
+      // Return cached value if computing at current stored flow
+      if (temp_flow == flow && cached_der_flow_ == flow) {
+        return cached_der_;
+      }
       if (capacity == 0 || b == 0) {
         return 0;
       }
       T ratio = temp_flow / capacity;
       if (ratio < 0) ratio = 0;
+      T result;
       if (is_integer_power_) {
-        return free_flow_time * b * power * IntPow(ratio, power_int_ - 1) / capacity;
+        result = free_flow_time * b * power * IntPow(ratio, power_int_ - 1) / capacity;
+      } else {
+        result = free_flow_time * b * power * std::pow(ratio, power - 1) / capacity;
       }
-      return free_flow_time * b * power * std::pow(ratio, power - 1) / capacity;
+      // Cache if computing at current stored flow
+      if (temp_flow == flow) {
+        cached_der_ = result;
+        cached_der_flow_ = flow;
+      }
+      return result;
     }
 
     /**

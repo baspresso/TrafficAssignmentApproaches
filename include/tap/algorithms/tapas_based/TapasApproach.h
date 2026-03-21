@@ -8,6 +8,7 @@
 #include <string>
 #include <random>
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include "../common/TrafficAssignmentApproach.h"
 #include "./components/TapasShiftMethod.h"
@@ -43,12 +44,16 @@ namespace TrafficAssignment {
                   int max_iterations = 200,
                   int pas_per_origin = 1,
                   int pas_multiplier = 5,
-                  int rgap_check_interval = 5)
+                  int rgap_check_interval = 5,
+                  T mu = T(0.5),
+                  T v = T(0.25))
       : TrafficAssignmentApproach<T>::TrafficAssignmentApproach(network, alpha),
         max_iterations_(max_iterations),
         pas_per_origin_(pas_per_origin),
         pas_multiplier_(pas_multiplier),
         rgap_check_interval_(rgap_check_interval),
+        mu_(mu),
+        v_(v),
         rng_(std::random_device{}()) {
 
       shift_method_ = TapasShiftMethodFactory<T>::GetInstance().Create(shift_method_name, this->GetLinksRef(), computation_threshold_);
@@ -66,12 +71,14 @@ namespace TrafficAssignment {
       links_origin_least_cost_routes_tree_.resize(this->number_of_origins_,
           std::vector<bool>(this->network_.number_of_links(), false));
       parent_origin_least_cost_routes_tree_.resize(this->number_of_origins_);
+      dijkstra_distances_.resize(this->number_of_origins_);
       origin_link_pair_pas_.resize(this->number_of_origins_);
 
       for (int origin_index = 0; origin_index < this->number_of_origins_; origin_index++) {
         bush_links_flows_[origin_index].resize(this->network_.number_of_links(), 0);
         origin_link_corresponding_pas_[origin_index].resize(this->network_.number_of_links(), -1);
         parent_origin_least_cost_routes_tree_[origin_index].resize(this->network_.number_of_nodes(), -1);
+        dijkstra_distances_[origin_index].resize(this->network_.number_of_nodes(), T(0));
       }
     }
 
@@ -165,6 +172,9 @@ namespace TrafficAssignment {
     /// @brief Per-origin Dijkstra least-cost tree: parent_[origin][node] = parent node.
     std::vector <std::vector <int>> parent_origin_least_cost_routes_tree_;
 
+    /// @brief Per-origin Dijkstra distances: dijkstra_distances_[origin][node] = SP distance.
+    std::vector <std::vector <T>> dijkstra_distances_;
+
     /// @brief Per-origin least-cost tree membership: links_[origin][link] = true if link is in tree.
     std::vector <std::vector<bool>> links_origin_least_cost_routes_tree_;
 
@@ -183,7 +193,23 @@ namespace TrafficAssignment {
     const T computation_threshold_ = 1e-10;
     static constexpr int max_hash_probes_ = 10000;
 
+    /// @brief Cross-origin PAS reuse: maps terminal link pair -> PAS hash (TAsK: pasExist).
+    std::unordered_map<int64_t, int> terminal_pair_to_pas_hash_;
+    static constexpr int64_t kMaxLinksEncoding = 100000;
+
+    int64_t EncodeTerminalPair(int link1, int link2) const {
+      if (link1 > link2) std::swap(link1, link2);
+      return static_cast<int64_t>(link1) * kMaxLinksEncoding + link2;
+    }
+
     bool has_valid_state_ = false;
+
+    /// @brief PAS effectiveness parameters (TAsK: mu, v).
+    T mu_;   ///< Cost-effectiveness: PAS cost_diff must >= mu * reduced_cost
+    T v_;    ///< Flow-effectiveness: min origin flow on exp seg >= v * exp_link_flow
+
+    /// @brief Adaptive PAS creation threshold counter (TAsK: nbIter_).
+    int pas_creation_iteration_ = 1;
 
     /// @brief Priority queue of PAS ordered by cost difference (largest first).
     /// Entries may be stale (PAS eliminated); checked before processing.
@@ -204,14 +230,17 @@ namespace TrafficAssignment {
         origin_corresponding_pas_set_[i].clear();
         std::fill(links_origin_least_cost_routes_tree_[i].begin(), links_origin_least_cost_routes_tree_[i].end(), false);
         std::fill(parent_origin_least_cost_routes_tree_[i].begin(), parent_origin_least_cost_routes_tree_[i].end(), -1);
+        std::fill(dijkstra_distances_[i].begin(), dijkstra_distances_[i].end(), T(0));
         origin_link_pair_pas_[i].clear();
       }
       reserved_pas_hash_.clear();
+      terminal_pair_to_pas_hash_.clear();
       pas_users_.clear();
       pas_flow_shift_starting_point_.clear();
       while (!delta_pas_queue.empty()) {
         delta_pas_queue.pop();
       }
+      pas_creation_iteration_ = 1;
     }
 
     /// @brief All-or-nothing (AON) initialization: assigns full demand to shortest paths
@@ -378,6 +407,7 @@ namespace TrafficAssignment {
         }
 
         processed[u] = true;
+        dijkstra_distances_[origin_index][u] = cur_delay;
         for (const auto now : this->network_.adjacency()[u]) {
           if (!processed[this->network_.links()[now].term]) {
             q.push({ cur_delay + this->network_.links()[now].Delay(), now });
@@ -465,7 +495,7 @@ namespace TrafficAssignment {
       }
       throw std::runtime_error("HashPas: exceeded max probe limit (" + std::to_string(max_hash_probes_) + ")");
     }
-    void OriginLinkPasInitialization(int origin_index, const std::pair <std::vector <int>, std::vector <int>>& found_pas) {
+    int OriginLinkPasInitialization(int origin_index, const std::pair <std::vector <int>, std::vector <int>>& found_pas) {
       int pas_hash = HashPas(found_pas);
       this->pas_users_[pas_hash].insert(origin_index);
       std::pair <int, int> term_links = { found_pas.first[found_pas.first.size() - 1], found_pas.second[found_pas.second.size() - 1] };
@@ -473,6 +503,7 @@ namespace TrafficAssignment {
         std::swap(term_links.first, term_links.second);
       }
       origin_link_pair_pas_[origin_index][term_links] = pas_hash;
+      terminal_pair_to_pas_hash_[EncodeTerminalPair(term_links.first, term_links.second)] = pas_hash;
       if (this->pas_users_[pas_hash].size() == 1) {
         delta_pas_queue.push({ PasDelta(pas_hash), pas_hash });
       }
@@ -486,6 +517,7 @@ namespace TrafficAssignment {
       }
       // requires reconsideration
       this->pas_flow_shift_starting_point_[pas_hash] = 1;
+      return pas_hash;
     }
 
     /**
@@ -499,6 +531,7 @@ namespace TrafficAssignment {
      * @param origin_index Index into origins_ array.
      * @param link_index The non-tree link that triggers PAS construction.
      * @return (least_cost_segment, non_least_cost_segment), or empty if construction fails.
+     *
      */
     std::pair <std::vector <int>, std::vector <int>> OriginLinkPasConstruction(int origin_index, int link_index) {
       // contains nodes that are going to be processed through bfs
@@ -549,6 +582,58 @@ namespace TrafficAssignment {
       return found_pas;
     }
 
+    /**
+     * @brief Strict variant of OriginLinkPasConstruction with flow threshold on BFS.
+     *
+     * Same backward BFS as OriginLinkPasConstruction, but only follows links where
+     * origin bush flow >= flow_threshold (instead of > 0). This finds PAS along paths
+     * with more concentrated flow (TAsK: createPAS with checkThreshold).
+     */
+    std::pair<std::vector<int>, std::vector<int>> OriginLinkPasConstructionStrict(
+        int origin_index, int link_index, T flow_threshold) {
+      std::queue<int> q;
+      std::unordered_set<int> processed_nodes;
+      std::unordered_set<int> origin_term_route;
+      std::unordered_map<int, int> used_link;
+      int now = this->network_.links()[link_index].term;
+      while (now != origins_[origin_index]) {
+        int parent = this->parent_origin_least_cost_routes_tree_[origin_index][now];
+        if (parent < 0) {
+          return {{}, {}};
+        }
+        now = parent;
+        origin_term_route.insert(now);
+      }
+      now = this->network_.links()[link_index].init;
+      used_link[now] = link_index;
+      q.push(now);
+      processed_nodes.insert(now);
+      std::pair<std::vector<int>, std::vector<int>> found_pas;
+      bool fl = false;
+      while (!fl) {
+        if (q.empty()) {
+          return {{}, {}};
+        }
+        now = q.front();
+        q.pop();
+        if (origin_term_route.count(now)) {
+          found_pas = PasReconstruction(origin_index, now, link_index, origin_term_route, used_link);
+          fl = true;
+        }
+        else {
+          for (auto cur_link : this->network_.reverse_adjacency()[now]) {
+            if ((bush_links_flows_[origin_index][cur_link] >= flow_threshold) &&
+                (!processed_nodes.count(this->network_.links()[cur_link].init))) {
+              processed_nodes.insert(this->network_.links()[cur_link].init);
+              q.push(this->network_.links()[cur_link].init);
+              used_link[this->network_.links()[cur_link].init] = cur_link;
+            }
+          }
+        }
+      }
+      return found_pas;
+    }
+
     bool CheckLinkPairPas(int origin_index, int link_1, int link_2) {
       if (link_1 > link_2) {
         std::swap(link_1, link_2);
@@ -561,6 +646,79 @@ namespace TrafficAssignment {
       }
     }
 
+    /// @brief Adaptive PAS creation threshold (TAsK: calcThreshold).
+    /// Returns 10 * 10^(-iteration), increasingly selective over iterations.
+    T CalcPasCreationThreshold() const {
+      return T(10.0) * std::pow(T(10.0), -T(pas_creation_iteration_));
+    }
+
+    /// @brief Cost-effectiveness: PAS cost difference >= mu * reduced_cost (TAsK: checkIfCostEffective).
+    bool CheckPasCostEffective(int pas_hash, T mu_times_reduced_cost) const {
+      auto pas_it = reserved_pas_hash_.find(pas_hash);
+      if (pas_it == reserved_pas_hash_.end()) return false;
+      const auto& pas = pas_it->second;
+      T cost_diff = std::abs(
+          Link<T>::GetLinksDelay(this->network_.links(), pas.first)
+          - Link<T>::GetLinksDelay(this->network_.links(), pas.second));
+      return cost_diff >= mu_times_reduced_cost;
+    }
+
+    /// @brief Flow-effectiveness: min origin flow on expensive segment >= v * origin flow on exp_link
+    /// (TAsK: checkIfFlowEffective).
+    bool CheckPasFlowEffective(int pas_hash, int origin_index, int exp_link_index) const {
+      auto pas_it = reserved_pas_hash_.find(pas_hash);
+      if (pas_it == reserved_pas_hash_.end()) return false;
+      const auto& pas = pas_it->second;
+      const std::vector<int>& expensive_seg = (Link<T>::GetLinksDelay(this->network_.links(), pas.first)
+          > Link<T>::GetLinksDelay(this->network_.links(), pas.second)) ? pas.first : pas.second;
+      T min_flow = T(-1);
+      for (auto link_id : expensive_seg) {
+        T flow = bush_links_flows_[origin_index][link_id];
+        if (min_flow < T(0) || flow < min_flow) min_flow = flow;
+      }
+      if (min_flow < T(0)) return false;
+      return min_flow >= v_ * bush_links_flows_[origin_index][exp_link_index];
+    }
+
+    /// @brief Combined effectiveness check (TAsK: checkIfEffective).
+    bool CheckPasEffective(int pas_hash, int origin_index, int exp_link_index, T mu_rc) const {
+      return CheckPasCostEffective(pas_hash, mu_rc) && CheckPasFlowEffective(pas_hash, origin_index, exp_link_index);
+    }
+
+    /// @brief Computes reduced cost for a link's PAS construction candidacy.
+    /// Returns positive reduced cost if link qualifies, negative if it doesn't.
+    T LinkPasConstructionReducedCost(int origin_index, int link_index) {
+      if (this->links_origin_least_cost_routes_tree_[origin_index][link_index]) {
+        return T(-1);
+      }
+      if (this->bush_links_flows_[origin_index][link_index] < this->computation_threshold_) {
+        return T(-1);
+      }
+      int term = this->network_.links()[link_index].term;
+      int parent_node = parent_origin_least_cost_routes_tree_[origin_index][term];
+      if (parent_node < 0) {
+        return T(-1);
+      }
+      int least_cost_routes_link = -1;
+      for (int adj_link : this->network_.adjacency()[parent_node]) {
+        if (this->network_.links()[adj_link].term == term) {
+          least_cost_routes_link = adj_link;
+        }
+      }
+      int from_node = this->network_.links()[link_index].init;
+      int to_node = this->network_.links()[link_index].term;
+      T reduced_cost = dijkstra_distances_[origin_index][from_node]
+                     + this->network_.links()[link_index].Delay()
+                     - dijkstra_distances_[origin_index][to_node];
+      if (reduced_cost < computation_threshold_) {
+        return T(-1);
+      }
+      if (CheckLinkPairPas(origin_index, link_index, least_cost_routes_link)) {
+        return T(-1);
+      }
+      return reduced_cost;
+    }
+
     /**
      * @brief Checks whether a link qualifies for PAS construction.
      *
@@ -569,36 +727,107 @@ namespace TrafficAssignment {
      * have a PAS for the same terminal link pair. See Bar-Gera (2010) Section 6.1-6.2.
      */
     bool LinkPasConstructionCondition(int origin_index, int link_index) {
-      if (this->links_origin_least_cost_routes_tree_[origin_index][link_index]) {
-        return false;
+      return LinkPasConstructionReducedCost(origin_index, link_index) > T(0);
+    }
+
+    /// @brief Tries to add an origin to an existing PAS via cross-origin reuse (TAsK: pasExist/addOrigin).
+    /// Validates that the origin has positive flow on the expensive segment before adding.
+    /// @return true if origin was successfully added to the existing PAS.
+    bool TryAddOriginToExistingPas(int origin_index, int existing_hash) {
+      auto pas_it = reserved_pas_hash_.find(existing_hash);
+      if (pas_it == reserved_pas_hash_.end()) return false;
+
+      // Check if already a user
+      auto users_it = pas_users_.find(existing_hash);
+      if (users_it != pas_users_.end() && users_it->second.count(origin_index)) return true;
+
+      const auto& pas = pas_it->second;
+      // Validate origin has flow on the expensive (second) segment
+      // After RecalcPasDirection, second segment is the costlier one
+      const std::vector<int>& expensive_seg = (Link<T>::GetLinksDelay(this->network_.links(), pas.first)
+          > Link<T>::GetLinksDelay(this->network_.links(), pas.second)) ? pas.first : pas.second;
+      for (auto link_id : expensive_seg) {
+        if (bush_links_flows_[origin_index][link_id] == 0) return false;
       }
-      if (this->bush_links_flows_[origin_index][link_index] < this->computation_threshold_) {
-        return false;
+
+      // Origin has valid flow — add it
+      pas_users_[existing_hash].insert(origin_index);
+      origin_corresponding_pas_set_[origin_index].insert(existing_hash);
+      for (auto pas_link : pas.first) {
+        origin_link_corresponding_pas_[origin_index][pas_link] = existing_hash;
       }
-      int term = this->network_.links()[link_index].term;
-      int parent_node = parent_origin_least_cost_routes_tree_[origin_index][term];
-      if (parent_node < 0) {
-        return false;
+      for (auto pas_link : pas.second) {
+        origin_link_corresponding_pas_[origin_index][pas_link] = existing_hash;
       }
-      int least_cost_routes_link = -1;
-      for (int adj_link : this->network_.adjacency()[parent_node]) {
-        if (this->network_.links()[adj_link].term == term) {
-          least_cost_routes_link = adj_link;
-        }
-      }
-      if (CheckLinkPairPas(origin_index, link_index, least_cost_routes_link)) {
-        return false;
-      }
+      std::pair<int, int> term_links = { pas.first.back(), pas.second.back() };
+      if (term_links.first > term_links.second) std::swap(term_links.first, term_links.second);
+      origin_link_pair_pas_[origin_index][term_links] = existing_hash;
       return true;
     }
 
-    // For every link that doesn't have a PAS corresponding to it builds a new PAS
+    /**
+     * @brief For every link that qualifies, builds PAS with two-pass effectiveness logic.
+     *
+     * Implements TAsK PASManager::createNewPAS pattern:
+     * 1. Try cross-origin PAS reuse; check effectiveness (mu/v gates)
+     * 2. If no reuse: Pass 1 — relaxed BFS (any positive flow), check effectiveness
+     * 3. If not effective AND reduced_cost > adaptive threshold:
+     *    Pass 2 — strict BFS (flow >= v * exp_link_flow)
+     */
     void SingleOriginLinksPasConstruction(int origin_index) {
       for (int link_index = 0; link_index < this->network_.number_of_links(); link_index++) {
-        if (LinkPasConstructionCondition(origin_index, link_index)) {
+        T reduced_cost = LinkPasConstructionReducedCost(origin_index, link_index);
+        if (reduced_cost <= T(0)) continue;
+
+        T mu_reduced_cost = mu_ * reduced_cost;
+        bool is_effective = false;
+        bool reused = false;
+
+        // Derive sp_link for terminal pair lookup
+        int term = this->network_.links()[link_index].term;
+        int parent_node = parent_origin_least_cost_routes_tree_[origin_index][term];
+        int sp_link = -1;
+        for (int adj_link : this->network_.adjacency()[parent_node]) {
+          if (this->network_.links()[adj_link].term == term) {
+            sp_link = adj_link;
+          }
+        }
+
+        // Cross-origin PAS reuse (TAsK: pasExist + addOrigin)
+        int64_t tp_key = EncodeTerminalPair(sp_link, link_index);
+        auto tp_it = terminal_pair_to_pas_hash_.find(tp_key);
+        if (tp_it != terminal_pair_to_pas_hash_.end()) {
+          if (TryAddOriginToExistingPas(origin_index, tp_it->second)) {
+            reused = true;
+            is_effective = CheckPasEffective(tp_it->second, origin_index, link_index, mu_reduced_cost);
+          }
+        }
+
+        // Pass 1: Relaxed BFS (only if reuse didn't succeed)
+        if (!reused) {
           auto pas = OriginLinkPasConstruction(origin_index, link_index);
           if (!pas.first.empty() && !pas.second.empty()) {
-            OriginLinkPasInitialization(origin_index, pas);
+            T cost_diff = std::abs(
+                Link<T>::GetLinksDelay(this->network_.links(), pas.first)
+                - Link<T>::GetLinksDelay(this->network_.links(), pas.second));
+            if (cost_diff >= computation_threshold_) {
+              int pas_hash = OriginLinkPasInitialization(origin_index, pas);
+              is_effective = CheckPasEffective(pas_hash, origin_index, link_index, mu_reduced_cost);
+            }
+          }
+        }
+
+        // Pass 2: Strict BFS if not effective and reduced cost is significant (TAsK: checkThreshold)
+        if (!is_effective && reduced_cost > CalcPasCreationThreshold()) {
+          T flow_threshold = v_ * bush_links_flows_[origin_index][link_index];
+          auto pas = OriginLinkPasConstructionStrict(origin_index, link_index, flow_threshold);
+          if (!pas.first.empty() && !pas.second.empty()) {
+            T cost_diff = std::abs(
+                Link<T>::GetLinksDelay(this->network_.links(), pas.first)
+                - Link<T>::GetLinksDelay(this->network_.links(), pas.second));
+            if (cost_diff >= computation_threshold_) {
+              OriginLinkPasInitialization(origin_index, pas);
+            }
           }
         }
       }
@@ -762,6 +991,7 @@ namespace TrafficAssignment {
       }
       auto users_it = pas_users_.find(pas_hash);
       if (users_it == pas_users_.end()) {
+        terminal_pair_to_pas_hash_.erase(EncodeTerminalPair(term_links.first, term_links.second));
         reserved_pas_hash_.erase(pas_it);
         return;
       }
@@ -778,7 +1008,7 @@ namespace TrafficAssignment {
         }
       }
       pas_users_.erase(pas_hash);
-      // REQUIRES CONSIDERATION
+      terminal_pair_to_pas_hash_.erase(EncodeTerminalPair(term_links.first, term_links.second));
       reserved_pas_hash_.erase(pas_hash);
     }
 
@@ -847,7 +1077,27 @@ namespace TrafficAssignment {
      * If that overshoots, delegates to the shift method (Newton step or line search)
      * for a partial shift. See Bar-Gera (2010) Table 3.
      */
+    /// @brief Recalculates PAS segment costs and swaps segments if direction has reversed.
+    void RecalcPasDirection(int pas_hash) {
+      auto it = reserved_pas_hash_.find(pas_hash);
+      if (it == reserved_pas_hash_.end()) return;
+      auto& pas = it->second;
+      T cost1 = Link<T>::GetLinksDelay(this->network_.links(), pas.first);
+      T cost2 = Link<T>::GetLinksDelay(this->network_.links(), pas.second);
+      if (cost1 > cost2) {
+        std::swap(pas.first, pas.second);
+      }
+    }
+
+    /// @brief Recalculates direction labels for all active PAS (TAsK: recalculatePASCosts).
+    void RecalcAllPasDirections() {
+      for (auto& [pas_hash, _] : reserved_pas_hash_) {
+        RecalcPasDirection(pas_hash);
+      }
+    }
+
     void PasFlowShift(const int pas_hash, bool elimination_flag) {
+      RecalcPasDirection(pas_hash);
       auto flow_info = this->ComputePasFlowInfo(pas_hash);
       if (TryFullPasFlowShift(pas_hash, flow_info.totals, flow_info.per_origin, elimination_flag)) {
         return;
@@ -985,10 +1235,13 @@ namespace TrafficAssignment {
       }
       std::shuffle(origin_order.begin(), origin_order.end(), rng_);
       for (int origin_index : origin_order) {
+        SingleOriginRemoveAllCyclicFlows(origin_index);
         BuildSingleOriginLeastCostRoutesTree(origin_index);
+        RecalcAllPasDirections();
         SingleOriginLinksPasConstruction(origin_index);
-        for (int cnt = 0; cnt < pas_per_origin_; cnt++) {
-          PasProcessing(false);
+        // Shift ALL PAS per origin (match TAsK behavior)
+        for (const auto& [pas_hash, _] : reserved_pas_hash_) {
+          PasFlowShift(pas_hash, false);
         }
       }
       for (int cnt = 0; cnt < pas_multiplier_ * 4; cnt++) {
@@ -996,6 +1249,8 @@ namespace TrafficAssignment {
           PasProcessing(true);
         }
       }
+      ++pas_creation_iteration_;
+
       if (statistics_recording) {
         this->statistics_recorder_.RecordStatistics();
       }

@@ -35,6 +35,8 @@ struct TapRunConfig {
   int pas_per_origin = 0;              // Tapas-specific
   int pas_multiplier = 0;              // Tapas-specific
   int rgap_check_interval = 0;         // Tapas-specific (0 = use default)
+  long double tapas_mu = 0.0L;         // Tapas PAS cost-effectiveness (0 = use default 0.5)
+  long double tapas_v = 0.0L;          // Tapas PAS flow-effectiveness (0 = use default 0.25)
 };
 
 void ApplyTapRunOption(TapRunConfig& config,
@@ -65,6 +67,10 @@ void ApplyTapRunOption(TapRunConfig& config,
     config.pas_multiplier = ParseNumber<int>(raw_value, key);
   } else if (key == "rgap_check_interval") {
     config.rgap_check_interval = ParseNumber<int>(raw_value, key);
+  } else if (key == "tapas_mu" || key == "mu") {
+    config.tapas_mu = ParseNumber<long double>(raw_value, key);
+  } else if (key == "tapas_v" || key == "v") {
+    config.tapas_v = ParseNumber<long double>(raw_value, key);
   } else if (key == "output_root") {
     config.output_root = raw_value;
   } else if (key == "print_effective_config" || key == "print_config") {
@@ -140,6 +146,8 @@ void ApplyEnvironmentOverrides(TapRunConfig& config) {
   apply("CND_PAS_PER_ORIGIN", "pas_per_origin");
   apply("CND_PAS_MULTIPLIER", "pas_multiplier");
   apply("CND_RGAP_CHECK_INTERVAL", "rgap_check_interval");
+  apply("CND_TAPAS_MU", "tapas_mu");
+  apply("CND_TAPAS_V", "tapas_v");
   apply("CND_OUTPUT_ROOT", "output_root");
   apply("CND_PRINT_CONFIG", "print_effective_config");
 }
@@ -176,7 +184,9 @@ CreateApproach(const TapRunConfig& config, TrafficAssignment::Network<long doubl
       config.max_standard_iterations > 0 ? config.max_standard_iterations : 20,
       config.pas_per_origin > 0 ? config.pas_per_origin : 1,
       config.pas_multiplier > 0 ? config.pas_multiplier : 5,
-      config.rgap_check_interval > 0 ? config.rgap_check_interval : 5
+      config.rgap_check_interval > 0 ? config.rgap_check_interval : 5,
+      config.tapas_mu > 0.0L ? config.tapas_mu : 0.5L,
+      config.tapas_v > 0.0L ? config.tapas_v : 0.25L
     );
   }
   throw std::runtime_error(
@@ -205,6 +215,8 @@ void PrintHelp() {
     << "  --pas-per-origin <n>             Tapas PAS per origin (default: 1)\n"
     << "  --pas-multiplier <n>             Tapas PAS multiplier (default: 5)\n"
     << "  --rgap-check-interval <n>        Tapas rgap check frequency (default: 5)\n"
+    << "  --tapas-mu <value>               Tapas PAS cost-effectiveness (default: 0.5)\n"
+    << "  --tapas-v <value>                Tapas PAS flow-effectiveness (default: 0.25)\n"
     << "  --output-root <path>             Output directory (default: performance_results)\n"
     << "  --print-config <true|false>      Print effective config (default: true)\n"
     << "  --help                           Show this help\n\n"
@@ -213,6 +225,7 @@ void PrintHelp() {
     << "  CND_ROUTE_THREADS, CND_MAX_STANDARD_ITERATIONS,\n"
     << "  CND_FULL_ITERATION_COUNT, CND_ORIGIN_ITERATION_COUNT, CND_EMA_ALPHA,\n"
     << "  CND_PAS_PER_ORIGIN, CND_PAS_MULTIPLIER, CND_RGAP_CHECK_INTERVAL,\n"
+    << "  CND_TAPAS_MU, CND_TAPAS_V,\n"
     << "  CND_OUTPUT_ROOT, CND_PRINT_CONFIG\n\n"
     << "Examples:\n"
     << "  tap_runner.exe --dataset SiouxFalls --approach Tapas\n"
@@ -246,6 +259,10 @@ void PrintEffectiveConfig(const TapRunConfig& config,
     std::cout << "  pas_multiplier: " << config.pas_multiplier << '\n';
   if (config.rgap_check_interval > 0)
     std::cout << "  rgap_check_interval: " << config.rgap_check_interval << '\n';
+  if (config.tapas_mu > 0.0L)
+    std::cout << "  tapas_mu: " << config.tapas_mu << '\n';
+  if (config.tapas_v > 0.0L)
+    std::cout << "  tapas_v: " << config.tapas_v << '\n';
   std::cout << "  output_root: " << config.output_root << '\n';
   std::cout << std::endl;
 }

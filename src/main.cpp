@@ -39,6 +39,8 @@ struct RunConfig {
   int pas_per_origin = 0;              // Tapas-specific
   int pas_multiplier = 0;              // Tapas-specific
   int rgap_check_interval = 0;         // Tapas-specific (0 = use default)
+  long double tapas_mu = 0.0L;         // Tapas PAS cost-effectiveness (0 = use default 0.5)
+  long double tapas_v = 0.0L;          // Tapas PAS flow-effectiveness (0 = use default 0.25)
 
   long double link_capacity_selection_threshold = 1e-3L;
   long double budget_threshold = 1e-1L;
@@ -108,6 +110,14 @@ void ApplyRunOption(RunConfig& config,
   }
   if (key == "rgap_check_interval") {
     config.rgap_check_interval = ParseNumber<int>(raw_value, key);
+    return;
+  }
+  if (key == "tapas_mu" || key == "mu") {
+    config.tapas_mu = ParseNumber<long double>(raw_value, key);
+    return;
+  }
+  if (key == "tapas_v" || key == "v") {
+    config.tapas_v = ParseNumber<long double>(raw_value, key);
     return;
   }
   if (key == "link_capacity_selection_threshold" || key == "link_threshold") {
@@ -208,6 +218,14 @@ void ApplyStepOption(TrafficAssignment::OptimizationStepConfig& step,
     step.local_tolerance = ParseNumber<double>(raw_value, key);
   } else if (key == "population_size") {
     step.population_size = ParseNumber<int>(raw_value, key);
+  } else if (key == "step_size" || key == "initial_step_size") {
+    step.step_size = ParseNumber<double>(raw_value, key);
+  } else if (key == "fd_epsilon" || key == "finite_diff_epsilon") {
+    step.fd_epsilon = ParseNumber<double>(raw_value, key);
+  } else if (key == "gradient_method" || key == "gradient_estimator") {
+    step.gradient_method = raw_value;
+  } else if (key == "stochastic_optimizer" || key == "optimizer") {
+    step.stochastic_optimizer = raw_value;
   } else {
     throw std::runtime_error("Unknown step option: '" + raw_key + "'");
   }
@@ -306,6 +324,8 @@ void ApplyEnvironmentOverrides(RunConfig& config) {
   apply_run("CND_PAS_PER_ORIGIN", "pas_per_origin");
   apply_run("CND_PAS_MULTIPLIER", "pas_multiplier");
   apply_run("CND_RGAP_CHECK_INTERVAL", "rgap_check_interval");
+  apply_run("CND_TAPAS_MU", "tapas_mu");
+  apply_run("CND_TAPAS_V", "tapas_v");
   apply_run("CND_LINK_THRESHOLD", "link_capacity_selection_threshold");
   apply_run("CND_BUDGET_THRESHOLD", "budget_threshold");
   apply_run("CND_BUDGET_MULTIPLIER", "budget_function_multiplier");
@@ -361,7 +381,9 @@ CreateApproach(const RunConfig& config, TrafficAssignment::Network<long double>&
       config.max_standard_iterations > 0 ? config.max_standard_iterations : 20,
       config.pas_per_origin > 0 ? config.pas_per_origin : 1,
       config.pas_multiplier > 0 ? config.pas_multiplier : 5,
-      config.rgap_check_interval > 0 ? config.rgap_check_interval : 5
+      config.rgap_check_interval > 0 ? config.rgap_check_interval : 5,
+      config.tapas_mu > 0.0L ? config.tapas_mu : 0.5L,
+      config.tapas_v > 0.0L ? config.tapas_v : 0.25L
     );
   }
   throw std::runtime_error(
@@ -385,13 +407,17 @@ void PrintHelp() {
     << "  type = optimality_condition\n"
     << "  max_iterations = 30\n\n"
     << "Step options:\n"
-    << "  type                             nlopt | optimality_condition | optimlib\n"
+    << "  type                             nlopt | optimality_condition | optimlib | gradient_descent\n"
     << "  algorithm                        NLopt: LN_COBYLA, GN_ISRES, ...\n"
     << "                                   OptimLib: DE, PSO, NM, DE_PRMM, PSO_DV, GD\n"
     << "  local_algorithm                  Local sub-algorithm for AUGLAG (NLopt)\n"
     << "  max_iterations                   Max iterations/generations for this step\n"
     << "  tolerance                        Convergence tolerance\n"
     << "  population_size                  Population size for OptimLib (0=auto)\n"
+    << "  step_size                        Initial step size for gradient descent (default: 1.0)\n"
+    << "  fd_epsilon                       Finite difference epsilon for gradient descent (default: 1e-4)\n"
+    << "  gradient_method                  Gradient estimator: finite_difference (default), spsa, sensitivity\n"
+    << "  stochastic_optimizer             Stochastic optimizer: sgd (default), momentum, adam\n"
     << "  name                             Display name for this step\n\n"
     << "General options (CLI or [run] section):\n"
     << "  --config <path>                  INI config file path (required)\n"
@@ -406,6 +432,8 @@ void PrintHelp() {
     << "  --ema-alpha <value>              RouteBased EMA smoothing (default: 0.7)\n"
     << "  --pas-per-origin <n>             Tapas PAS per origin (default: 1)\n"
     << "  --pas-multiplier <n>             Tapas PAS multiplier (default: 5)\n"
+    << "  --tapas-mu <value>               Tapas PAS cost-effectiveness (default: 0.5)\n"
+    << "  --tapas-v <value>                Tapas PAS flow-effectiveness (default: 0.25)\n"
     << "  --link-threshold <value>\n"
     << "  --budget-threshold <value>\n"
     << "  --budget-multiplier <value>\n"
@@ -451,6 +479,10 @@ void PrintEffectiveConfig(const RunConfig& config,
     std::cout << "  pas_multiplier: " << config.pas_multiplier << '\n';
   if (config.rgap_check_interval > 0)
     std::cout << "  rgap_check_interval: " << config.rgap_check_interval << '\n';
+  if (config.tapas_mu > 0.0L)
+    std::cout << "  tapas_mu: " << config.tapas_mu << '\n';
+  if (config.tapas_v > 0.0L)
+    std::cout << "  tapas_v: " << config.tapas_v << '\n';
   std::cout << "  budget_upper_bound: " << config.budget_upper_bound << '\n';
   std::cout << "  metrics.output_root: " << config.metrics.output_root << '\n';
   if (!config.metrics.append_dataset_subdir) {
@@ -466,6 +498,15 @@ void PrintEffectiveConfig(const RunConfig& config,
     std::cout << " max_iter=" << step.max_iterations;
     if (step.tolerance > 0) std::cout << " tol=" << step.tolerance;
     if (step.population_size > 0) std::cout << " pop_size=" << step.population_size;
+    if (step.type == "gradient_descent") {
+      std::cout << " step_size=" << step.step_size << " fd_eps=" << step.fd_epsilon;
+      if (!step.gradient_method.empty()) {
+        std::cout << " gradient_method=" << step.gradient_method;
+      }
+      if (!step.stochastic_optimizer.empty()) {
+        std::cout << " optimizer=" << step.stochastic_optimizer;
+      }
+    }
     std::cout << '\n';
   }
   std::cout << std::endl;
