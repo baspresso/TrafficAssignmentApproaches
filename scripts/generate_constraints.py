@@ -5,9 +5,9 @@ Usage:
     python generate_constraints.py <net_name> [options]
 
 Example:
-    python generate_constraints.py SiouxFalls
-    python generate_constraints.py SiouxFalls --lower-multiplier 0.8 --upper-multiplier 1.2
-    python generate_constraints.py SiouxFalls --investment-cost-param 100
+    python scripts/generate_constraints.py SiouxFalls
+    python scripts/generate_constraints.py SiouxFalls --lower-multiplier 0.8 --upper-multiplier 1.2
+    python scripts/generate_constraints.py SiouxFalls --investment-cost-param 100
 """
 
 import argparse

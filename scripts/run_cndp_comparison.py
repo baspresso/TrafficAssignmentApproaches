@@ -113,17 +113,17 @@ def build_core_scenarios() -> list[Scenario]:
         # 1. OptCond-only — proposed method
         Scenario(
             name="OptCond",
-            description="Proposed optimality condition method (35 iters)",
+            description="Proposed optimality condition method (60 iters)",
             steps=[
-                StepConfig(type="optimality_condition", max_iterations=35),
+                StepConfig(type="optimality_condition", max_iterations=60),
             ],
         ),
         # 2. COBYLA-only — popular derivative-free constrained optimizer
         Scenario(
             name="COBYLA",
-            description="NLopt COBYLA (50 iters)",
+            description="NLopt COBYLA (500 iters)",
             steps=[
-                StepConfig(type="nlopt", algorithm="LN_COBYLA", max_iterations=50, tolerance=1e-4),
+                StepConfig(type="nlopt", algorithm="LN_COBYLA", max_iterations=500, tolerance=1e-4),
             ],
         ),
         # 3. BOBYQA-only — quadratic model (penalty-based constraints)
@@ -144,14 +144,14 @@ def build_core_scenarios() -> list[Scenario]:
         #     ],
         # ),
         # 11. GD-SPSA — gradient descent with SPSA gradient estimation (2 evals/iter)
-        Scenario(
-            name="GD-SPSA",
-            description="Gradient descent with SPSA (300 iters)",
-            steps=[
-                StepConfig(type="gradient_descent", max_iterations=300, tolerance=1e-10,
-                           step_size=0.1, fd_epsilon=0.05, gradient_method="spsa"),
-            ],
-        ),
+        # Scenario(
+        #     name="GD-SPSA",
+        #     description="Gradient descent with SPSA (300 iters)",
+        #     steps=[
+        #         StepConfig(type="gradient_descent", max_iterations=300, tolerance=1e-10,
+        #                    step_size=0.1, fd_epsilon=0.05, gradient_method="spsa"),
+        #     ],
+        # ),
         # 12. GD-Sensitivity — gradient descent with analytical sensitivity gradient
         # Scenario(
         #     name="GD-Sensitivity",

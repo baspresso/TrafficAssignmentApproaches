@@ -9,7 +9,7 @@
 
 #include "../include/common/ConfigUtils.h"
 #include "../include/tap/algorithms/route_based/RouteBasedApproach.h"
-#include "../include/tap/algorithms/tapas_based/TapasApproach.h"
+#include "../include/tap/algorithms/tapas/TapasApproach.h"
 #include "../include/tap/core/NetworkBuilder.h"
 
 namespace fs = std::filesystem;
@@ -176,15 +176,11 @@ CreateApproach(const TapRunConfig& config, TrafficAssignment::Network<long doubl
       config.ema_alpha > 0.0L ? config.ema_alpha : 0.7L
     );
   }
-  if (approach == "tapas") {
+  if (approach == "tapas" || approach == "tasktapas" || approach == "task_tapas" || approach == "task") {
     return std::make_shared<TrafficAssignment::TapasApproach<long double>>(
       network,
       config.approach_alpha,
-      config.shift_method,
-      config.max_standard_iterations > 0 ? config.max_standard_iterations : 20,
-      config.pas_per_origin > 0 ? config.pas_per_origin : 1,
-      config.pas_multiplier > 0 ? config.pas_multiplier : 5,
-      config.rgap_check_interval > 0 ? config.rgap_check_interval : 5,
+      config.max_standard_iterations > 0 ? config.max_standard_iterations : 200,
       config.tapas_mu > 0.0L ? config.tapas_mu : 0.5L,
       config.tapas_v > 0.0L ? config.tapas_v : 0.25L
     );
@@ -204,7 +200,7 @@ void PrintHelp() {
     << "Options:\n"
     << "  --config <path>                  INI config file path\n"
     << "  --dataset <name>                 Dataset name (default: SiouxFalls)\n"
-    << "  --approach <name>                RouteBased | Tapas | DemandBased (default: Tapas)\n"
+    << "  --approach <name>                RouteBased | Tapas (default: Tapas)\n"
     << "  --shift-method <name>            Shift method (default: NewtonStep)\n"
     << "  --approach-alpha <value>         Convergence threshold (default: 1e-14)\n"
     << "  --route-threads <n>              Route search thread count (default: 1)\n"
@@ -212,9 +208,6 @@ void PrintHelp() {
     << "  --full-iteration-count <n>       RouteBased OD queue passes (default: 3)\n"
     << "  --origin-iteration-count <n>     RouteBased per-origin passes (default: 1)\n"
     << "  --ema-alpha <value>              RouteBased EMA smoothing (default: 0.7)\n"
-    << "  --pas-per-origin <n>             Tapas PAS per origin (default: 1)\n"
-    << "  --pas-multiplier <n>             Tapas PAS multiplier (default: 5)\n"
-    << "  --rgap-check-interval <n>        Tapas rgap check frequency (default: 5)\n"
     << "  --tapas-mu <value>               Tapas PAS cost-effectiveness (default: 0.5)\n"
     << "  --tapas-v <value>                Tapas PAS flow-effectiveness (default: 0.25)\n"
     << "  --output-root <path>             Output directory (default: performance_results)\n"

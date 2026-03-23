@@ -137,6 +137,12 @@ public:
 
   // --- Utility methods ---
 
+  /// @brief Returns true if a link is an active design variable (upper bound > lower bound).
+  ///        Links with collapsed bounds (b ≈ 0 or power ≈ 0) are excluded from optimization.
+  bool IsActiveDesignVariable(int link_index) const {
+    return constraints[link_index].upper_bound > constraints[link_index].lower_bound;
+  }
+
   /// @brief Checks if a double value is finite (not NaN or infinity).
   static bool IsFiniteNumber(double value) {
     return std::isfinite(value);

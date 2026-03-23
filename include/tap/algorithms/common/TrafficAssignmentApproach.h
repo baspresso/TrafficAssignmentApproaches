@@ -20,7 +20,7 @@ namespace TrafficAssignment {
    *
    * Subclasses implement specific algorithms:
    * - RouteBasedApproach: path-based with explicit route enumeration
-   * - TapasApproach: bush-based TAPAS with paired alternative segments
+   * - TapasApproach: bush-based TAPAS with paired alternative segments (PAS)
    *
    * @tparam T Numeric type for flow computations.
    */
@@ -65,6 +65,8 @@ namespace TrafficAssignment {
     }
 
     Network<T>& network() { return network_; }
+
+    T GetAlpha() const { return alpha_; }
 
     protected:
       Network<T>& network_;

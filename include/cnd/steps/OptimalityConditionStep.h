@@ -261,6 +261,7 @@ private:
     int max_index = -1, min_index = -1;
 
     for (int link_index = 0; link_index < ctx.network.number_of_links(); link_index++) {
+      if (!ctx.IsActiveDesignVariable(link_index)) continue;
       if (ctx.network.mutable_links()[link_index].flow <
           CndOptimizationContext<T>::kInitialTransferAmount) continue;
       auto cur_capacity = ctx.network.mutable_links()[link_index].capacity;
@@ -285,6 +286,7 @@ private:
     T min_value = max_value;
 
     for (int link_index = 0; link_index < ctx.network.number_of_links(); link_index++) {
+      if (!ctx.IsActiveDesignVariable(link_index)) continue;
       if (ctx.network.mutable_links()[link_index].flow <
           CndOptimizationContext<T>::kInitialTransferAmount) continue;
       auto cur_capacity = ctx.network.mutable_links()[link_index].capacity;
@@ -317,6 +319,7 @@ private:
   bool ProcessingCheck(CndOptimizationContext<T>& ctx,
                        int link_index, T middle_bound_value,
                        const std::vector<OdCache>& od_cache) {
+    if (!ctx.IsActiveDesignVariable(link_index)) return false;
     if (ctx.network.mutable_links()[link_index].flow <
         CndOptimizationContext<T>::kFlowSignificanceThreshold) return false;
     auto cur_capacity = ctx.network.mutable_links()[link_index].capacity;

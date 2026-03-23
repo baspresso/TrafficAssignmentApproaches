@@ -14,7 +14,7 @@
 #include "../include/cnd/DirectedConstraintLoader.h"
 #include "../include/cnd/OptimizationStep.h"
 #include "../include/tap/algorithms/route_based/RouteBasedApproach.h"
-#include "../include/tap/algorithms/tapas_based/TapasApproach.h"
+#include "../include/tap/algorithms/tapas/TapasApproach.h"
 #include "../include/tap/core/NetworkBuilder.h"
 
 namespace fs = std::filesystem;
@@ -373,15 +373,11 @@ CreateApproach(const RunConfig& config, TrafficAssignment::Network<long double>&
       config.ema_alpha > 0.0L ? config.ema_alpha : 0.7L
     );
   }
-  if (approach == "tapas") {
+  if (approach == "tapas" || approach == "tasktapas" || approach == "task_tapas" || approach == "task") {
     return std::make_shared<TrafficAssignment::TapasApproach<long double>>(
       network,
       config.approach_alpha,
-      config.shift_method,
-      config.max_standard_iterations > 0 ? config.max_standard_iterations : 20,
-      config.pas_per_origin > 0 ? config.pas_per_origin : 1,
-      config.pas_multiplier > 0 ? config.pas_multiplier : 5,
-      config.rgap_check_interval > 0 ? config.rgap_check_interval : 5,
+      config.max_standard_iterations > 0 ? config.max_standard_iterations : 200,
       config.tapas_mu > 0.0L ? config.tapas_mu : 0.5L,
       config.tapas_v > 0.0L ? config.tapas_v : 0.25L
     );
@@ -424,14 +420,12 @@ void PrintHelp() {
     << "  --dataset <name>                 Dataset name (e.g. SiouxFalls)\n"
     << "  --constraints-file <path>        Constraints CSV path\n"
     << "  --approach <RouteBased|Tapas>\n"
-    << "  --shift-method <name>            Shift method (RouteBased/Tapas)\n"
+    << "  --shift-method <name>            Shift method (RouteBased)\n"
     << "  --route-threads <n>              Route search thread count\n"
     << "  --max-standard-iterations <n>    TAP iteration limit (default: 200/20)\n"
     << "  --full-iteration-count <n>       RouteBased OD queue passes (default: 3)\n"
     << "  --origin-iteration-count <n>     RouteBased per-origin passes (default: 1)\n"
     << "  --ema-alpha <value>              RouteBased EMA smoothing (default: 0.7)\n"
-    << "  --pas-per-origin <n>             Tapas PAS per origin (default: 1)\n"
-    << "  --pas-multiplier <n>             Tapas PAS multiplier (default: 5)\n"
     << "  --tapas-mu <value>               Tapas PAS cost-effectiveness (default: 0.5)\n"
     << "  --tapas-v <value>                Tapas PAS flow-effectiveness (default: 0.25)\n"
     << "  --link-threshold <value>\n"
@@ -559,6 +553,24 @@ int main(int argc, char** argv) {
     loader.SetVerbose(config.loader_verbose);
     auto constraints = loader.LoadFromFile(constraints_path.string());
 
+    // Exclude flow-insensitive links from optimization:
+    // - b ≈ 0 or power ≈ 0: delay independent of flow/capacity
+    // - free_flow_time ≈ 0: delay always near zero regardless of capacity
+    int excluded_count = 0;
+    for (int i = 0; i < static_cast<int>(constraints.size()); ++i) {
+      const auto& link = network.links()[i];
+      if (std::abs(static_cast<double>(link.b)) < 1e-10 ||
+          std::abs(static_cast<double>(link.power)) < 1e-10 ||
+          std::abs(static_cast<double>(link.free_flow_time)) < 1e-10) {
+        constraints[i].upper_bound = constraints[i].lower_bound;
+        ++excluded_count;
+      }
+    }
+    int active_count = static_cast<int>(constraints.size()) - excluded_count;
+    std::cout << "      Link filtering: " << excluded_count << " of " << constraints.size()
+              << " links excluded (b ~ 0, power ~ 0, or free_flow_time ~ 0), "
+              << active_count << " active design variables" << std::endl;
+
     if (config.step_sections.empty()) {
       throw std::runtime_error(
         "No [step.N] sections found in config. At least one optimization step "
@@ -590,7 +602,9 @@ int main(int argc, char** argv) {
     );
 
     std::cout << "      BilevelCND solver created" << std::endl;
-    std::cout << "      Design variables: " << constraints.size() << std::endl;
+    std::cout << "      Design variables: " << active_count
+              << " active (" << excluded_count << " excluded of "
+              << constraints.size() << " total)" << std::endl;
 
     std::cout << "\nRunning bilevel optimization..." << std::endl;
 

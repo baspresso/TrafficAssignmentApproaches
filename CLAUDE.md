@@ -48,7 +48,7 @@ Two solver implementations, both implementing `TrafficAssignmentApproach<T>`:
 
 1. **RouteBasedApproach** — Explicit path enumeration; factory-based shift methods (`NewtonStep`, `Krylatov2023`). Supports parallel route search via `route_search_threads`.
 
-2. **TapasApproach** — Bush-based TAPAS algorithm; fastest, reaches machine precision (~1e-15 RGAP). Shift methods: `NewtonStep` (best), `LineSearch`, `AdvancedGradientDescent`.
+2. **TapasApproach** — Bush-based TAPAS algorithm (TAsK-style); fastest, reaches machine precision (~1e-15 RGAP). Uses Halley step with Armijo backtracking, stall detection with bush restart, random origin shuffle.
 
 ### Bilevel CNDP (`include/cnd/`)
 
@@ -73,7 +73,7 @@ Environment variable prefix: `CND_` (e.g., `CND_ROUTE_THREADS=1`). CLI metrics a
 
 ### INI Sections
 
-**`[run]`** — Algorithm selection: `dataset`, `approach` (RouteBased/Tapas), `shift_method`, `approach_alpha`, `route_search_threads`, `budget_function_multiplier`, `budget_upper_bound`, `constraints_file`.
+**`[run]`** — Algorithm selection: `dataset`, `approach` (RouteBased/Tapas), `shift_method` (RouteBased only), `approach_alpha`, `route_search_threads`, `tapas_mu`, `tapas_v`, `budget_function_multiplier`, `budget_upper_bound`, `constraints_file`.
 
 **`[metrics]`** — Output control: `enable_trace`, `output_root`, `write_metadata_json`, `write_summary_csv`, `scenario_name`, `append_dataset_subdir`.
 
@@ -112,5 +112,5 @@ Network files (`*_net.csv`): `init_node, term_node, capacity, length, free_flow_
 
 - **Headers-only design:** Most implementation is in `.h` files under `include/`.
 - **Templates on numeric type:** `template<typename T>` parameterized (typically `double`, `long double`, or Boost high-precision).
-- **Factory pattern:** Used for algorithm selection — `RouteBasedShiftMethodFactory`, `TapasShiftMethodFactory`, `OptimizationStepFactory`.
+- **Factory pattern:** Used for algorithm selection — `RouteBasedShiftMethodFactory`, `OptimizationStepFactory`.
 - **Pipeline-based optimization:** All CNDP configs must use `[step.N]` sections; the legacy single-algorithm constructor was removed.
