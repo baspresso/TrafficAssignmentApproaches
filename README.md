@@ -54,13 +54,13 @@ cmake --build --preset build-debug
 
 3. Run:
 ```powershell
-.\build\mingw-vcpkg-release\main.exe
-.\build\mingw-vcpkg-debug\main.exe
+.\build\mingw-vcpkg-release\cndp_solver.exe
+.\build\mingw-vcpkg-debug\cndp_solver.exe
 ```
 
 ## Layered Runtime Config (defaults -> config -> env -> CLI)
 
-`main.exe` now supports layered configuration:
+`cndp_solver.exe` now supports layered configuration:
 
 - Defaults in code
 - INI config file (`--config ...` or `CND_CONFIG`)
@@ -73,24 +73,24 @@ Example config file:
 
 Run using config only:
 ```powershell
-.\build\mingw-vcpkg-release\main.exe --config .\configs\cnd.siouxfalls.ini
+.\build\mingw-vcpkg-release\cndp_solver.exe --config .\configs\cnd.siouxfalls.ini
 ```
 
 Run with environment override:
 ```powershell
 $env:CND_ROUTE_THREADS = "1"
-.\build\mingw-vcpkg-release\main.exe --config .\configs\cnd.siouxfalls.ini
+.\build\mingw-vcpkg-release\cndp_solver.exe --config .\configs\cnd.siouxfalls.ini
 ```
 
 Run with CLI override (wins over env + file):
 ```powershell
 $env:CND_ROUTE_THREADS = "1"
-.\build\mingw-vcpkg-release\main.exe --config .\configs\cnd.siouxfalls.ini --route-threads 2 --max-standard-iters 150
+.\build\mingw-vcpkg-release\cndp_solver.exe --config .\configs\cnd.siouxfalls.ini --route-threads 2 --max-standard-iters 150
 ```
 
 Show all available options:
 ```powershell
-.\build\mingw-vcpkg-release\main.exe --help
+.\build\mingw-vcpkg-release\cndp_solver.exe --help
 ```
 
 For regular work you usually only need one pair configure/build commands for the selected preset.
@@ -99,7 +99,7 @@ For regular work you usually only need one pair configure/build commands for the
 ```powershell
 cmake --preset mingw-vcpkg-relwithdebinfo
 cmake --build --preset build-relwithdebinfo
-.\build\mingw-vcpkg-relwithdebinfo\main.exe
+.\build\mingw-vcpkg-relwithdebinfo\cndp_solver.exe
 ```
 
 ## Benchmark Networks

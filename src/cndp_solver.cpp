@@ -390,7 +390,7 @@ CreateApproach(const RunConfig& config, TrafficAssignment::Network<long double>&
 
 void PrintHelp() {
   std::cout
-    << "Usage: main.exe --config <path> [options]\n\n"
+    << "Usage: cndp_solver.exe --config <path> [options]\n\n"
     << "Layering: defaults -> config file -> environment -> CLI\n\n"
     << "Optimization steps are defined via [step.N] sections in the INI config file.\n"
     << "Example:\n"

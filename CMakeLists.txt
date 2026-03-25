@@ -46,33 +46,33 @@ target_include_directories(optimlib PUBLIC ${optimlib_SOURCE_DIR}/include)
 target_compile_definitions(optimlib PUBLIC OPTIM_ENABLE_EIGEN_WRAPPERS)
 target_link_libraries(optimlib PUBLIC Eigen3::Eigen)
 
-add_executable(main src/main.cpp)
+add_executable(cndp_solver src/cndp_solver.cpp)
 
-target_link_libraries(main PRIVATE
+target_link_libraries(cndp_solver PRIVATE
     Eigen3::Eigen
     Boost::multiprecision
     NLopt::nlopt
     optimlib
 )
 
-add_executable(tap_runner src/tap_main.cpp)
+add_executable(tap_solver src/tap_solver.cpp)
 
-target_link_libraries(tap_runner PRIVATE
+target_link_libraries(tap_solver PRIVATE
     Eigen3::Eigen
     Boost::multiprecision
 )
 
 # MinGW debug builds hit the COFF section limit on large TUs; -Wa,-mbig-obj raises it.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(main PRIVATE $<$<CONFIG:Debug>:-Wa,-mbig-obj>)
-    target_compile_options(tap_runner PRIVATE $<$<CONFIG:Debug>:-Wa,-mbig-obj>)
+    target_compile_options(cndp_solver PRIVATE $<$<CONFIG:Debug>:-Wa,-mbig-obj>)
+    target_compile_options(tap_solver PRIVATE $<$<CONFIG:Debug>:-Wa,-mbig-obj>)
 endif()
 
 if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     get_filename_component(MINGW_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
     foreach(MINGW_RUNTIME_DLL libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
         if(EXISTS "${MINGW_BIN_DIR}/${MINGW_RUNTIME_DLL}")
-            foreach(TARGET_EXE main tap_runner)
+            foreach(TARGET_EXE cndp_solver tap_solver)
                 add_custom_command(
                     TARGET ${TARGET_EXE}
                     POST_BUILD

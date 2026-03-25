@@ -32,7 +32,7 @@ from typing import Optional
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-EXE_PATH = PROJECT_ROOT / "build" / "mingw-vcpkg-release" / "main.exe"
+EXE_PATH = PROJECT_ROOT / "build" / "mingw-vcpkg-release" / "cndp_solver.exe"
 SCENARIO_CONFIG_DIR = PROJECT_ROOT / "configs" / "scenarios"
 
 
@@ -612,7 +612,7 @@ def main():
         "--exe",
         type=str,
         default=None,
-        help="Path to main.exe (default: build/mingw-vcpkg-release/main.exe)",
+        help="Path to cndp_solver.exe (default: build/mingw-vcpkg-release/cndp_solver.exe)",
     )
 
     args = parser.parse_args()

@@ -193,7 +193,7 @@ CreateApproach(const TapRunConfig& config, TrafficAssignment::Network<long doubl
 
 void PrintHelp() {
   std::cout
-    << "Usage: tap_runner.exe [options]\n\n"
+    << "Usage: tap_solver.exe [options]\n\n"
     << "Standalone Traffic Assignment solver.\n"
     << "All options have defaults, so no arguments are required.\n\n"
     << "Layering: defaults -> config file -> environment -> CLI\n\n"
@@ -221,9 +221,9 @@ void PrintHelp() {
     << "  CND_TAPAS_MU, CND_TAPAS_V,\n"
     << "  CND_OUTPUT_ROOT, CND_PRINT_CONFIG\n\n"
     << "Examples:\n"
-    << "  tap_runner.exe --dataset SiouxFalls --approach Tapas\n"
-    << "  tap_runner.exe --config configs/tap.siouxfalls.ini\n"
-    << "  tap_runner.exe --dataset Anaheim --approach RouteBased --shift-method NewtonStep\n"
+    << "  tap_solver.exe --dataset SiouxFalls --approach Tapas\n"
+    << "  tap_solver.exe --config configs/tap.siouxfalls.ini\n"
+    << "  tap_solver.exe --dataset Anaheim --approach RouteBased --shift-method NewtonStep\n"
     << "\nSupported approaches: RouteBased, Tapas\n";
 }
 
@@ -314,6 +314,28 @@ int main(int argc, char** argv) {
     std::cout << "  RelativeGap:       " << network.RelativeGap() << std::endl;
     std::cout << "  ObjectiveFunction: " << network.ObjectiveFunction() << std::endl;
     std::cout << "  TotalTravelTime:   " << network.TotalTravelTime() << std::endl;
+
+    // Write link flow distribution
+    {
+      const auto flows_dir = output_root / config.dataset;
+      std::filesystem::create_directories(flows_dir);
+      const auto flows_path = flows_dir / "link_flows.csv";
+      std::ofstream flows_file(flows_path, std::ios::out);
+      flows_file << "link_id,init_node,term_node,capacity,free_flow_time,flow,cost\n";
+      flows_file << std::setprecision(10);
+      const auto& links = network.links();
+      for (int i = 0; i < network.number_of_links(); ++i) {
+        const auto& link = links[i];
+        flows_file << i << ","
+                   << link.init << ","
+                   << link.term << ","
+                   << link.capacity << ","
+                   << link.free_flow_time << ","
+                   << link.flow << ","
+                   << link.Delay() << "\n";
+      }
+      std::cout << "  Link flows:        " << flows_path.string() << std::endl;
+    }
 
     return 0;
   } catch (const std::exception& ex) {

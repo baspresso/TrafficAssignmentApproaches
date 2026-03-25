@@ -14,18 +14,18 @@ cmake --preset mingw-vcpkg-release    # or mingw-vcpkg-debug / mingw-vcpkg-relwi
 cmake --build --preset build-release  # or build-debug / build-relwithdebinfo
 
 # Run
-./build/mingw-vcpkg-release/main.exe --config configs/cnd.siouxfalls.ini
-./build/mingw-vcpkg-release/main.exe --help
+./build/mingw-vcpkg-release/cndp_solver.exe --config configs/cnd.siouxfalls.ini
+./build/mingw-vcpkg-release/cndp_solver.exe --help
 ```
 
-Two executables: `main.exe` (CNDP solver) and `tap_runner.exe` (standalone TAP solver). Build output goes to `build/<preset-name>/`. No automated tests — validation is done by running experiments and inspecting metrics outputs.
+Two executables: `cndp_solver.exe` (CNDP solver) and `tap_solver.exe` (standalone TAP solver). Build output goes to `build/<preset-name>/`. No automated tests — validation is done by running experiments and inspecting metrics outputs.
 
 ## Architecture
 
 ### Domain Layers
 
 ```
-main.cpp                          — Config parsing, wiring, execution
+cndp_solver.cpp                   — Config parsing, wiring, execution
     ↓
 cnd/BilevelCND                    — Upper-level optimization over link capacities
     ↓
@@ -63,7 +63,7 @@ Two solver implementations, both implementing `TrafficAssignmentApproach<T>`:
 Layered config system with precedence: **defaults → INI file → environment variables → CLI args**.
 
 ```bash
-./build/mingw-vcpkg-release/main.exe \
+./build/mingw-vcpkg-release/cndp_solver.exe \
   --config ./configs/cnd.siouxfalls.ini \
   --route-threads 2 \
   --max-standard-iters 150
@@ -82,12 +82,12 @@ Environment variable prefix: `CND_` (e.g., `CND_ROUTE_THREADS=1`). CLI metrics a
 - `type = optimality_condition` — `max_iterations`
 - `type = optimlib` — `algorithm` (DE, DE_PRMM, PSO, PSO_DV, NM, GD), `max_iterations`, `population_size` (0 = auto)
 
-At least one `[step.N]` section is required; `main.cpp` errors if none found.
+At least one `[step.N]` section is required; `cndp_solver.cpp` errors if none found.
 
 ## Key File Locations
 
-- `src/main.cpp` — CNDP entry point; all config/wiring logic
-- `src/tap_main.cpp` — Standalone TAP solver entry point
+- `src/cndp_solver.cpp` — CNDP entry point; all config/wiring logic
+- `src/tap_solver.cpp` — Standalone TAP solver entry point
 - `include/cnd/BilevelCND.h` — Bilevel optimization core
 - `include/cnd/CndOptimizationContext.h` — Shared context, objective evaluation, crash recovery
 - `include/cnd/OptimizationPipeline.h` — Sequential step execution
@@ -101,6 +101,7 @@ At least one `[step.N]` section is required; `main.cpp` errors if none found.
 
 ## Scripts
 
+- `scripts/run_experiment.py` — Unified experiment runner for TAP and CNDP. Creates self-contained run folders with CSV outputs and publication-ready plots. Subcommands: `tap` (standalone TAP), `cndp` (single CNDP scenario).
 - `scripts/run_cndp_comparison.py` — Batch runner: generates per-scenario INI configs, launches experiments, organizes outputs into self-contained run folders under `performance_results/{Dataset}/runs/`.
 - `scripts/plot_cndp_comparison.py` — Publication-ready analysis: objective vs time plots, convergence, sensitivity, summary tables (CSV + LaTeX). Supports `--run-dir` mode and multi-run averaging.
 
