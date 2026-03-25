@@ -10,7 +10,7 @@
 
 #include "GradientEstimator.h"
 #include "FiniteDifferenceEstimator.h"
-#include "../../sensitivity/OptimalitySensitivity.h"
+#include "../OptimalitySensitivity.h"
 
 namespace TrafficAssignment {
 

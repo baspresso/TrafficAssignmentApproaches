@@ -2,7 +2,7 @@
 #define ROUTE_BASED_SHIFT_METHOD_H
 
 #include <vector>
-#include "../../../core/Network.h"
+#include "../../core/Network.h"
 
 namespace TrafficAssignment {
   /**

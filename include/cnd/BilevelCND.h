@@ -13,7 +13,7 @@
 #include <limits>
 #include <fstream>
 #include <filesystem>
-#include "../tap/algorithms/common/TrafficAssignmentApproach.h"
+#include "../tap/algorithms/TrafficAssignmentApproach.h"
 #include "../tap/core/Network.h"
 #include "DirectedConstraintLoader.h"
 #include "CndStatisticsRecorder.h"

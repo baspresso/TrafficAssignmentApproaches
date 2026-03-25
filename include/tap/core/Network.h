@@ -344,4 +344,6 @@ private:
 
 } // namespace TrafficAssignment
 
+#include "NetworkMetrics.h"
+
 #endif // NETWORK_H

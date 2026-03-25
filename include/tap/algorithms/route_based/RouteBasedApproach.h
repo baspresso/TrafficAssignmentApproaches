@@ -6,8 +6,8 @@
 #include <atomic>
 #include <cstddef>
 #include <thread>
-#include "../common/TrafficAssignmentApproach.h"
-#include "./components/RouteBasedShiftMethod.h"
+#include "../TrafficAssignmentApproach.h"
+#include "./RouteBasedShiftMethod.h"
 #include "RouteBasedShiftMethodFactory.h"
 #include <random>
 
@@ -72,12 +72,17 @@ namespace TrafficAssignment {
         this->statistics_recorder_.RecordStatistics();
       }
 
+      constexpr int kRgapCheckInterval = 10;
       while (iteration_count++ < max_iterations_) {
         ResetExpectedDecreases();
         ProcessOrigins();
         ProcessODPairs(statistics_recording);
         if (statistics_recording) {
           this->statistics_recorder_.RecordStatistics();
+        }
+        if (iteration_count % kRgapCheckInterval == 0) {
+          T rgap = this->network_.RelativeGap();
+          if (std::abs(rgap) <= this->alpha_) break;
         }
       }
     }
@@ -284,10 +289,6 @@ namespace TrafficAssignment {
             (1 - ema_alpha_) * delta + ema_alpha_ * current;
     }
     
-    std::vector <T> FlowShift(int od_pair_index) {
-      return shift_method_->FlowShift(od_pair_index);
-    }
-
     /// @brief Computes partial Beckmann objective over links used by the given routes.
     T CalculateRoutesObjective(const std::vector<std::vector<int>>& routes) {
         T total = 0;
@@ -304,7 +305,8 @@ namespace TrafficAssignment {
         return total;
     }
 
-    void Reset() {
+    void Reset() override {
+        TrafficAssignmentApproach<T>::Reset();
         std::fill(objective_function_expected_decrease_.begin(), objective_function_expected_decrease_.end(), 0);
     }
 

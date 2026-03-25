@@ -6,8 +6,8 @@
 #include <unordered_map>
 #include <map>
 #include <cstddef>
-#include "../../utils/StatisticsRecorder.h"
-#include "../../core/Network.h"
+#include "../utils/StatisticsRecorder.h"
+#include "../core/Network.h"
 
 namespace TrafficAssignment {
 

@@ -12,7 +12,7 @@
 #include <boost/multiprecision/cpp_dec_float.hpp>
 #include "../OptimizationStep.h"
 #include "../CndOptimizationContext.h"
-#include "../sensitivity/OptimalitySensitivity.h"
+#include "../OptimalitySensitivity.h"
 #include "../../tap/data/Link.h"
 
 namespace TrafficAssignment {

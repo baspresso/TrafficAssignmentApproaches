@@ -5,9 +5,8 @@
 #include <string>
 #include <map>
 #include <functional>
-#include "components/RouteBasedShiftMethod.h"
-//#include "components/RouteBasedKrylatov2023ShiftMethod.h"
-#include "components/RouteBasedNewtonStepShiftMethod.h"
+#include "RouteBasedShiftMethod.h"
+#include "RouteBasedNewtonStepShiftMethod.h"
 
 namespace TrafficAssignment {
 
@@ -20,7 +19,7 @@ namespace TrafficAssignment {
  * @brief Singleton factory for route-based shift methods.
  *
  * Registers shift method constructors by name and creates instances on demand.
- * Currently registers: "NewtonStep". "Krylatov2023" is defined but commented out.
+ * Currently registers: "NewtonStep".
  */
 template <typename T>
 class RouteBasedShiftMethodFactory {
@@ -36,7 +35,6 @@ public:
   }
     
   void RegisterAll() {
-    //REGISTER_ROUTE_BASED_SHIFT_METHOD("Krylatov2023", RouteBasedKrylatov2023ShiftMethod);
     REGISTER_ROUTE_BASED_SHIFT_METHOD("NewtonStep", RouteBasedNewtonStepShiftMethod);
   }
     

@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "../../CndOptimizationContext.h"
+#include "../CndOptimizationContext.h"
 
 namespace TrafficAssignment {
 

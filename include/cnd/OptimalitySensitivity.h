@@ -6,8 +6,8 @@
 #include <unordered_set>
 #include <Eigen/Dense>
 #include <boost/multiprecision/cpp_dec_float.hpp>
-#include "../CndOptimizationContext.h"
-#include "../../tap/data/Link.h"
+#include "CndOptimizationContext.h"
+#include "../tap/data/Link.h"
 
 namespace TrafficAssignment {
 

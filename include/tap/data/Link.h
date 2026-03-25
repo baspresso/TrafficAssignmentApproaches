@@ -4,8 +4,6 @@
 #include <vector>
 #include <iostream>
 #include <cmath>
-#include <unordered_set>
-#include <Eigen/Dense>
 
 namespace TrafficAssignment {
 
@@ -195,13 +193,7 @@ namespace TrafficAssignment {
       return free_flow_time * b * power * (power - 1) * std::pow(ratio, power - 2) / (capacity * capacity);
     }
 
-    /**
-     * @brief Computes total delay for a sequence of links.
-     * @param links Vector of all links in the network.
-     * @param links_list Indices of links to include in the calculation.
-     * @return Sum of delays for the specified links (minutes).
-     */
-    static T GetLinksDelay(const std::vector <Link <T>>& links, const std::vector <int>& links_list) {
+    static T GetLinksDelay(const std::vector<Link<T>>& links, const std::vector<int>& links_list) {
       T ans = 0;
       for (auto now : links_list) {
         ans += links[now].Delay();
@@ -209,13 +201,7 @@ namespace TrafficAssignment {
       return ans;
     }
 
-    /**
-     * @brief Computes total first derivative of delay for a sequence of links.
-     * @param links Vector of all links in the network.
-     * @param links_list Indices of links to include in the calculation.
-     * @return Sum of delay derivatives for the specified links (minutes/vehicle).
-     */
-    static T GetLinksDelayDer(const std::vector <Link <T>>& links, const std::vector <int>& links_list) {
+    static T GetLinksDelayDer(const std::vector<Link<T>>& links, const std::vector<int>& links_list) {
       T ans = 0;
       for (auto now : links_list) {
         ans += links[now].DelayDer();
@@ -223,20 +209,14 @@ namespace TrafficAssignment {
       return ans;
     }
 
-    /**
-     * @brief Computes total second derivative of delay for a sequence of links.
-     * @param links Vector of all links in the network.
-     * @param links_list Indices of links to include in the calculation.
-     * @return Sum of second derivatives for the specified links (minutes/vehicle²).
-     */
-    static T GetLinksDelaySecondDer(const std::vector <Link <T>>& links, const std::vector <int>& links_list) {
+    static T GetLinksDelaySecondDer(const std::vector<Link<T>>& links, const std::vector<int>& links_list) {
       T ans = 0;
       for (auto now : links_list) {
         ans += links[now].DelaySecondDer();
       }
       return ans;
     }
-    
+
     /**
      * @brief Computes dt_a/dc_a, the partial derivative of delay with respect to capacity.
      *
@@ -280,68 +260,8 @@ namespace TrafficAssignment {
     }
   };
 
-  /**
-   * @brief Computes element J(i,j) of the route cost Jacobian matrix.
-   *
-   * J(i,j) = sum of dc_a/df_a over links shared by routes i and j.
-   * Used in the Krylatov (2023) shift method for Jacobian-based flow updates.
-   */
-  template <typename T>
-  T CalculateJacobiElement(const std::vector<int>& route_i,
-                           const std::vector<int>& route_j,
-                           const std::vector <Link<T>>& links) {
-    T sum = 0;
-    std::unordered_set<int> links_i(route_i.begin(), route_i.end());
-    
-    for(int link_id : route_j) {
-        if (links_i.count(link_id)) {
-          sum += links[link_id].DelayDer();
-        }
-    }
-    return sum;
-  }
+}  // namespace TrafficAssignment
 
-  /**
-   * @brief Builds the full route cost Jacobian matrix J for a set of routes.
-   *
-   * J(i,j) = sum_{a in route_i intersect route_j} dc_a/df_a.
-   * The matrix is symmetric since shared links contribute equally in both directions.
-   * Used by the Krylatov (2023) method: delta_F = -J^{-1} * (C - e * C_target).
-   */
-  template <typename T>
-  Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> RoutesJacobiMatrix(const std::vector<std::vector <int>>& routes, const std::vector <Link<T>>& links) {
-    const size_t R = routes.size();
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> J(R, R);
+#include "LinkCostAggregation.h"
 
-    // Pre-build link sets for all routes to avoid repeated construction
-    std::vector<std::unordered_set<int>> route_sets(R);
-    for (size_t i = 0; i < R; ++i) {
-      route_sets[i].insert(routes[i].begin(), routes[i].end());
-    }
-
-    // Exploit symmetry: J(i,j) = J(j,i) since both equal sum of DelayDer on shared links
-    for (size_t i = 0; i < R; ++i) {
-      // Diagonal
-      T sum = 0;
-      for (int link_id : routes[i]) {
-        sum += links[link_id].DelayDer();
-      }
-      J(i, i) = sum;
-
-      // Off-diagonal (upper triangle, mirror to lower)
-      for (size_t j = i + 1; j < R; ++j) {
-        T val = 0;
-        for (int link_id : routes[j]) {
-          if (route_sets[i].count(link_id)) {
-            val += links[link_id].DelayDer();
-          }
-        }
-        J(i, j) = val;
-        J(j, i) = val;
-      }
-    }
-    return J;
-  }
-}
-
-#endif
+#endif  // LINK_H

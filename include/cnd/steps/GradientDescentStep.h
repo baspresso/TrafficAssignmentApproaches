@@ -13,10 +13,10 @@
 
 #include "../OptimizationStep.h"
 #include "../CndOptimizationContext.h"
-#include "gradient_estimators/GradientEstimator.h"
-#include "gradient_estimators/FiniteDifferenceEstimator.h"
-#include "gradient_estimators/SPSAEstimator.h"
-#include "gradient_estimators/SensitivityEstimator.h"
+#include "GradientEstimator.h"
+#include "FiniteDifferenceEstimator.h"
+#include "SPSAEstimator.h"
+#include "SensitivityEstimator.h"
 
 namespace TrafficAssignment {
 
