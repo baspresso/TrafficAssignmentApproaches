@@ -20,6 +20,7 @@
 #include "OptimizationStep.h"
 #include "CndOptimizationContext.h"
 #include "OptimizationPipeline.h"
+#include "OptimalitySensitivity.h"
 #include <boost/multiprecision/cpp_dec_float.hpp>
 
 namespace TrafficAssignment {
@@ -426,7 +427,15 @@ private:
       OdCache& c = od_cache[od];
       c.routes  = network_.mutable_od_pairs()[od].GetRoutes();
       c.demand  = network_.od_pairs()[od].GetDemand();
-      c.e_col   = MatrixHightPrecision::Constant(rc, 1,
+
+      // Filter routes where ALL links have trivial BPR params (zero Jacobian rows)
+      std::erase_if(c.routes, [&](const std::vector<int>& route) {
+        return OptimalitySensitivity<T>::IsRouteTrivial(route, network_.mutable_links());
+      });
+      const int filtered_rc = static_cast<int>(c.routes.size());
+      if (filtered_rc <= 0) continue;
+
+      c.e_col   = MatrixHightPrecision::Constant(filtered_rc, 1,
         boost::multiprecision::cpp_dec_float_50(1));
       auto jacobi_hp = ConvertEigenMatrix(
           RoutesJacobiMatrix(c.routes, network_.mutable_links()));

@@ -2,6 +2,7 @@
 #define OPTIMALITY_SENSITIVITY_H
 
 #include <vector>
+#include <algorithm>
 #include <cmath>
 #include <unordered_set>
 #include <Eigen/Dense>
@@ -51,6 +52,19 @@ public:
     bool              valid = false;
   };
 
+  /// @brief Returns true if a link has trivial BPR parameters (DelayDer is always zero).
+  static bool IsLinkTrivialForSensitivity(const Link<T>& link) {
+    constexpr T eps = T(1e-10);
+    return std::abs(link.b) < eps || std::abs(link.power) < eps || std::abs(link.free_flow_time) < eps;
+  }
+
+  /// @brief Returns true if ALL links in the route are trivial (route contributes zero Jacobian row).
+  static bool IsRouteTrivial(const std::vector<int>& route, const std::vector<Link<T>>& links) {
+    return std::all_of(route.begin(), route.end(), [&](int idx) {
+      return IsLinkTrivialForSensitivity(links[idx]);
+    });
+  }
+
   /// @brief Builds the OD cache for all OD pairs: precomputes Jacobian inverses and denominators.
   std::vector<OdCache> BuildOdCache(CndOptimizationContext<T>& ctx) {
     const int n_od = ctx.network.number_of_od_pairs();
@@ -61,10 +75,18 @@ public:
       OdCache& c = od_cache[od];
       c.routes  = ctx.network.mutable_od_pairs()[od].GetRoutes();
       c.demand  = ctx.network.od_pairs()[od].GetDemand();
-      c.e_col   = MatrixHP::Constant(rc, 1, high_prec_sensitivity(1));
 
-      c.route_link_sets.resize(rc);
-      for (int r = 0; r < rc; ++r) {
+      // Filter routes where ALL links have trivial BPR params (zero Jacobian rows)
+      std::erase_if(c.routes, [&](const std::vector<int>& route) {
+        return IsRouteTrivial(route, ctx.network.mutable_links());
+      });
+      const int filtered_rc = static_cast<int>(c.routes.size());
+      if (filtered_rc <= 0) continue;
+
+      c.e_col   = MatrixHP::Constant(filtered_rc, 1, high_prec_sensitivity(1));
+
+      c.route_link_sets.resize(filtered_rc);
+      for (int r = 0; r < filtered_rc; ++r) {
         c.route_link_sets[r].insert(c.routes[r].begin(), c.routes[r].end());
       }
 

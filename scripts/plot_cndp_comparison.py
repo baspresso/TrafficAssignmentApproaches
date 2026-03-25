@@ -1189,7 +1189,6 @@ def main():
     parser = argparse.ArgumentParser(description="Plot CNDP comparison results")
     parser.add_argument(
         "--dataset",
-        choices=["SiouxFalls", "Anaheim"],
         default=None,
         help="Single dataset to analyze",
     )
