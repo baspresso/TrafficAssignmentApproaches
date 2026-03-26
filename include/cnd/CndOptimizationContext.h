@@ -52,22 +52,39 @@ public:
   static constexpr double kConstraintTolerance      = 1e-4;  ///< NLopt constraint feasibility tolerance.
 
   /// @brief Console progress bar state for long-running optimization loops.
+  ///
+  /// Supports three output formats controlled by `format`:
+  ///   - "bar":  Traditional \\r-based progress bar (default, for direct terminal use).
+  ///   - "line": Structured \\n-terminated lines ([STEP_START], [PROGRESS], [STEP_END])
+  ///             for machine parsing when stdout is piped (e.g., from Python scripts).
+  ///   - "none": Silent — no progress output at all.
   struct ProgressState {
     int count = 0;
     int total = 0;
     std::chrono::steady_clock::time_point start_time;
+    std::string step_name;
+    std::string format = "bar";
     bool active = false;
 
-    void Start(int total_target) {
+    void Start(int total_target, const std::string& name = "", const std::string& fmt = "bar") {
       count = 0;
       total = total_target;
+      step_name = name;
+      format = fmt;
       start_time = std::chrono::steady_clock::now();
       active = total_target > 0;
+      if (active && format == "line") {
+        std::cout << "[STEP_START] step=" << step_name << " total=" << total << "\n" << std::flush;
+      }
     }
 
     void Finish() {
       if (!active) return;
-      std::cout << '\n';
+      if (format == "line") {
+        std::cout << "[STEP_END] step=" << step_name << "\n" << std::flush;
+      } else if (format == "bar") {
+        std::cout << '\n';
+      }
       active = false;
     }
 
@@ -105,6 +122,7 @@ public:
   T link_capacity_selection_threshold;        ///< Minimum distance from bounds to consider a link for capacity transfer.
   std::size_t route_search_thread_count;      ///< Parallel thread count for route enumeration in RouteBased approach.
   bool verbose;                               ///< Enable console output (progress bars, warnings).
+  std::string progress_format;                ///< Progress output format: "bar", "line", or "none".
 
   // --- Mutable state ---
   RuntimeCounters& counters;                  ///< Shared counters across all pipeline steps.
@@ -121,7 +139,8 @@ public:
     std::size_t route_search_thread_count_val,
     bool verbose_val,
     RuntimeCounters& counters_ref,
-    CndStatisticsRecorder<T>& statistics_recorder_ref
+    CndStatisticsRecorder<T>& statistics_recorder_ref,
+    const std::string& progress_format_val = "bar"
   )
     : network(network_ref),
       approach(approach_ref),
@@ -133,7 +152,8 @@ public:
       route_search_thread_count(route_search_thread_count_val),
       verbose(verbose_val),
       counters(counters_ref),
-      statistics_recorder(statistics_recorder_ref) {}
+      statistics_recorder(statistics_recorder_ref),
+      progress_format(progress_format_val) {}
 
   // --- Utility methods ---
 
@@ -340,6 +360,25 @@ public:
     if (!state.active) return;
 
     state.Advance();
+
+    if (state.format == "none") return;
+
+    if (state.format == "line") {
+      auto now = std::chrono::steady_clock::now();
+      double elapsed = std::chrono::duration<double>(now - state.start_time).count();
+      double rate = elapsed > 0.0 ? static_cast<double>(state.count) / elapsed : 0.0;
+      std::string unit = suffix;
+      if (auto pos = unit.find_first_not_of(" \t"); pos != std::string::npos && pos > 0)
+        unit = unit.substr(pos);
+      std::cout << "[PROGRESS] step=" << state.step_name
+                << " current=" << state.count
+                << " total=" << state.total
+                << " rate=" << std::fixed << std::setprecision(2) << rate
+                << " unit=" << unit << "\n" << std::flush;
+      return;
+    }
+
+    // format == "bar": traditional \r-based progress bar
     int total = std::max(1, state.total);
     int current = std::min(state.count, total);
     int left = std::max(0, total - current);
@@ -381,6 +420,28 @@ public:
     if (!state.active) return;
 
     state.Advance();
+
+    if (state.format == "none") return;
+
+    if (state.format == "line") {
+      auto now = std::chrono::steady_clock::now();
+      double elapsed = std::chrono::duration<double>(now - state.start_time).count();
+      double rate = elapsed > 0.0 ? static_cast<double>(state.count) / elapsed : 0.0;
+      std::string unit = rate_unit;
+      if (auto pos = unit.find_first_not_of(" \t"); pos != std::string::npos && pos > 0)
+        unit = unit.substr(pos);
+      std::cout << "[PROGRESS] step=" << state.step_name
+                << " current=" << state.count
+                << " total=" << state.total
+                << " rate=" << std::fixed << std::setprecision(2) << rate
+                << " unit=" << unit
+                << " objective=" << std::defaultfloat << std::setprecision(10) << objective_function
+                << " ttt=" << total_travel_time
+                << " budget=" << budget_function << "\n" << std::flush;
+      return;
+    }
+
+    // format == "bar": traditional \r-based progress bar with metrics
     int total = std::max(1, state.total);
     int current = std::min(state.count, total);
     int left = std::max(0, total - current);
@@ -411,7 +472,7 @@ public:
          << current << "/" << total
          << " left:" << left
          << " [" << std::fixed << std::setprecision(2) << rate << rate_unit << "] "
-         << std::defaultfloat
+         << std::defaultfloat << std::setprecision(10)
          << "objective_function=" << objective_function
          << " total_travel_time=" << total_travel_time
          << " budget_function=" << budget_function;

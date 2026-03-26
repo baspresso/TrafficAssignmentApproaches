@@ -74,7 +74,8 @@ public:
     T budget_function_multiplier = 5,
     double budget_upper_bound = 100000,
     const CndMetricsConfig& metrics_config = CndMetricsConfig(),
-    std::size_t route_search_thread_count = 1
+    std::size_t route_search_thread_count = 1,
+    const std::string& progress_format = "bar"
   )
     : network_(network),
       approach_(approach),
@@ -87,7 +88,8 @@ public:
       verbose_(true),
       statistics_recorder_(network),
       metrics_config_(metrics_config),
-      route_search_thread_count_(route_search_thread_count)
+      route_search_thread_count_(route_search_thread_count),
+      progress_format_(progress_format)
   {
     ValidateConstraints(constraints, network);
     if (step_configs.empty()) {
@@ -117,6 +119,10 @@ public:
     return route_search_thread_count_;
   }
 
+  void SetVerbose(bool verbose) {
+    verbose_ = verbose;
+  }
+
   /**
    * @brief Main entry point: builds pipeline, creates context, executes, and records results.
    *
@@ -138,7 +144,8 @@ public:
       budget_function_multiplier_, budget_upper_bound_,
       budget_threshold_, link_capacity_selection_threshold_,
       route_search_thread_count_, verbose_,
-      counters, statistics_recorder_
+      counters, statistics_recorder_,
+      progress_format_
     );
 
     try {
@@ -184,6 +191,7 @@ private:
   CndStatisticsRecorder<T> statistics_recorder_;
   CndMetricsConfig metrics_config_;
   std::size_t route_search_thread_count_;
+  std::string progress_format_;
 
   // --- Constants for statistics progress ---
   static constexpr int kProgressBarWidth = 30;
@@ -244,7 +252,8 @@ private:
       budget_function_multiplier_, budget_upper_bound_,
       budget_threshold_, link_capacity_selection_threshold_,
       route_search_thread_count_, verbose_,
-      counters, statistics_recorder_
+      counters, statistics_recorder_,
+      progress_format_
     );
 
     double final_ta_compute_seconds = 0.0;
@@ -252,7 +261,6 @@ private:
       throw std::runtime_error("TA computation failed on final recovery attempt.");
     }
 
-    std::cout << ctx.Budget() << '\n';
     const auto optimization_end_time = std::chrono::steady_clock::now();
     const double optimization_elapsed_seconds =
       std::chrono::duration<double>(optimization_end_time - optimization_start_time).count();
@@ -273,14 +281,22 @@ private:
                             budget_function,
                             final_ta_compute_seconds,
                             true);
-    std::ostringstream timing_line;
-    timing_line << "optimization_time = "
+    // Always emit structured [RESULT] line for machine parsing
+    std::cout << "[RESULT]"
+              << " optimization_time=" << std::fixed << std::setprecision(2) << optimization_elapsed_seconds
+              << " objective_function=" << std::setprecision(10) << objective_function
+              << " total_travel_time=" << total_travel_time
+              << " budget_function=" << budget_function
+              << std::endl;
+
+    if (verbose_) {
+      std::cout << "optimization_time = "
                 << std::fixed << std::setprecision(2)
                 << optimization_elapsed_seconds << "s " << std::setprecision(10)
                 << "objective_function=" << objective_function
                 << " total_travel_time=" << total_travel_time
-                << " budget_function=" << budget_function << "\n";
-    std::cout << timing_line.str();
+                << " budget_function=" << budget_function << std::endl;
+    }
 
     StopStatisticsRecording(
       counters,
@@ -451,9 +467,7 @@ private:
 
     // Progress bar for statistics
     typename CndOptimizationContext<T>::ProgressState stats_progress;
-    stats_progress.total = n_links;
-    stats_progress.start_time = std::chrono::steady_clock::now();
-    std::cout << "StatisticsRecording-start\n";
+    stats_progress.Start(n_links, "StatisticsRecording", ctx.progress_format);
 
     for (int link_index = 0; link_index < n_links; ++link_index) {
       PrintStatisticsProgressAt(stats_progress, link_index);
@@ -478,7 +492,7 @@ private:
       link_condition_result[link_index] = result;
     }
     PrintStatisticsProgressAt(stats_progress, n_links);
-    std::cout << '\n';
+    stats_progress.Finish();
     return link_condition_result;
   }
 
@@ -534,7 +548,23 @@ private:
   void PrintStatisticsProgressAt(
       typename CndOptimizationContext<T>::ProgressState& stats_progress,
       int current) {
+    if (stats_progress.format == "none") return;
+
     int total = std::max(1, stats_progress.total);
+
+    if (stats_progress.format == "line") {
+      auto now = std::chrono::steady_clock::now();
+      double elapsed = std::chrono::duration<double>(now - stats_progress.start_time).count();
+      double links_per_sec = elapsed > 0.0 ? static_cast<double>(current) / elapsed : 0.0;
+      std::cout << "[PROGRESS] step=" << stats_progress.step_name
+                << " current=" << current
+                << " total=" << total
+                << " rate=" << std::fixed << std::setprecision(2) << links_per_sec
+                << " unit=links/s\n" << std::flush;
+      return;
+    }
+
+    // format == "bar": traditional \r-based progress bar
     int left  = std::max(0, total - current);
 
     double ratio  = static_cast<double>(current) / static_cast<double>(total);

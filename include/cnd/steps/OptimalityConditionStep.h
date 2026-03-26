@@ -66,7 +66,7 @@ public:
     }
 
     typename CndOptimizationContext<T>::ProgressState progress;
-    progress.Start(config_.max_iterations);
+    progress.Start(config_.max_iterations, GetName(), ctx.progress_format);
 
     try {
       // Record initial state before any iterations

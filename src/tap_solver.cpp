@@ -7,6 +7,13 @@
 #include <stdexcept>
 #include <string>
 
+#ifdef _WIN32
+  #include <io.h>
+  #include <cstdio>
+#else
+  #include <unistd.h>
+#endif
+
 #include "../include/common/ConfigUtils.h"
 #include "../include/tap/algorithms/route_based/RouteBasedApproach.h"
 #include "../include/tap/algorithms/tapas/TapasApproach.h"
@@ -26,6 +33,7 @@ struct TapRunConfig {
   std::size_t route_search_threads = 1;
   std::string output_root = "performance_results";
   bool print_effective_config = true;
+  std::string quiet = "auto";  // auto | true | false
 
   // TAP approach tuning (0 = use approach default)
   int max_standard_iterations = 0;
@@ -75,6 +83,8 @@ void ApplyTapRunOption(TapRunConfig& config,
     config.output_root = raw_value;
   } else if (key == "print_effective_config" || key == "print_config") {
     config.print_effective_config = ParseBool(raw_value, key);
+  } else if (key == "quiet") {
+    config.quiet = raw_value;
   } else {
     throw std::runtime_error("Unknown option: '" + raw_key + "'");
   }
@@ -212,6 +222,7 @@ void PrintHelp() {
     << "  --tapas-v <value>                Tapas PAS flow-effectiveness (default: 0.25)\n"
     << "  --output-root <path>             Output directory (default: performance_results)\n"
     << "  --print-config <true|false>      Print effective config (default: true)\n"
+    << "  --quiet <auto|true|false>        Quiet mode (auto=quiet when piped, default: auto)\n"
     << "  --help                           Show this help\n\n"
     << "Environment variables (CND_ prefix):\n"
     << "  CND_DATASET, CND_APPROACH, CND_APPROACH_ALPHA, CND_SHIFT_METHOD,\n"
@@ -288,32 +299,63 @@ int main(int argc, char** argv) {
     ApplyEnvironmentOverrides(config);
     ApplyCliOverrides(cli, config);
 
-    if (config.print_effective_config) {
+    // Resolve quiet mode: auto = quiet when stdout is piped
+    bool quiet;
+    if (config.quiet == "true") {
+      quiet = true;
+    } else if (config.quiet == "false") {
+      quiet = false;
+    } else {
+      #ifdef _WIN32
+        quiet = !_isatty(_fileno(stdout));
+      #else
+        quiet = !isatty(STDOUT_FILENO);
+      #endif
+    }
+
+    if (config.print_effective_config && !quiet) {
       PrintEffectiveConfig(config, project_root, config_path);
     }
 
-    std::cout << "Building network from dataset '" << config.dataset << "'..." << std::endl;
+    if (!quiet) {
+      std::cout << "Building network from dataset '" << config.dataset << "'..." << std::endl;
+    }
     TrafficAssignment::NetworkBuilder builder;
     auto network = builder.BuildFromDataset<long double>(config.dataset);
 
-    std::cout << "Creating approach: " << config.approach << " (" << config.shift_method << ")" << std::endl;
+    if (!quiet) {
+      std::cout << "Creating approach: " << config.approach << " (" << config.shift_method << ")" << std::endl;
+    }
     auto approach = CreateApproach(config, network);
 
     // Configure output path for statistics
     const fs::path output_root = ResolvePath(fs::path(config.output_root), project_root);
     approach->SetOutputRoot(output_root.string());
 
-    std::cout << "\nRunning Traffic Assignment...\n" << std::endl;
+    if (!quiet) {
+      std::cout << "\nRunning Traffic Assignment...\n" << std::endl;
+    }
     approach->ComputeTrafficFlows(true);
 
-    // Print final summary
-    std::cout << std::setprecision(15);
-    std::cout << "\n=== Traffic Assignment Results ===" << std::endl;
-    std::cout << "  Approach:          " << approach->GetApproachName() << std::endl;
-    std::cout << "  Dataset:           " << config.dataset << std::endl;
-    std::cout << "  RelativeGap:       " << network.RelativeGap() << std::endl;
-    std::cout << "  ObjectiveFunction: " << network.ObjectiveFunction() << std::endl;
-    std::cout << "  TotalTravelTime:   " << network.TotalTravelTime() << std::endl;
+    // Always emit structured [RESULT] line
+    std::cout << "[RESULT]"
+              << " approach=" << approach->GetApproachName()
+              << " dataset=" << config.dataset
+              << " relative_gap=" << std::setprecision(15) << network.RelativeGap()
+              << " objective_function=" << network.ObjectiveFunction()
+              << " total_travel_time=" << network.TotalTravelTime()
+              << std::endl;
+
+    // Print human-readable results when not quiet
+    if (!quiet) {
+      std::cout << std::setprecision(15);
+      std::cout << "\n=== Traffic Assignment Results ===" << std::endl;
+      std::cout << "  Approach:          " << approach->GetApproachName() << std::endl;
+      std::cout << "  Dataset:           " << config.dataset << std::endl;
+      std::cout << "  RelativeGap:       " << network.RelativeGap() << std::endl;
+      std::cout << "  ObjectiveFunction: " << network.ObjectiveFunction() << std::endl;
+      std::cout << "  TotalTravelTime:   " << network.TotalTravelTime() << std::endl;
+    }
 
     // Write link flow distribution
     {
@@ -334,7 +376,9 @@ int main(int argc, char** argv) {
                    << link.flow << ","
                    << link.Delay() << "\n";
       }
-      std::cout << "  Link flows:        " << flows_path.string() << std::endl;
+      if (!quiet) {
+        std::cout << "  Link flows:        " << flows_path.string() << std::endl;
+      }
     }
 
     return 0;

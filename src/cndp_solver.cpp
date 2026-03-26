@@ -9,6 +9,13 @@
 #include <stdexcept>
 #include <string>
 
+#ifdef _WIN32
+  #include <io.h>
+  #include <cstdio>
+#else
+  #include <unistd.h>
+#endif
+
 #include "../include/common/ConfigUtils.h"
 #include "../include/cnd/BilevelCND.h"
 #include "../include/cnd/DirectedConstraintLoader.h"
@@ -47,8 +54,11 @@ struct RunConfig {
   long double budget_function_multiplier = 5.0L;
   double budget_upper_bound = 100000.0;
 
+  std::string progress_format = "auto";
+
   bool loader_verbose = true;
   bool print_effective_config = true;
+  std::string quiet = "auto";  // auto | true | false
   TrafficAssignment::CndMetricsConfig metrics;
 
   // Pipeline step configs parsed from [step.N] sections
@@ -140,8 +150,16 @@ void ApplyRunOption(RunConfig& config,
     config.loader_verbose = ParseBool(raw_value, key);
     return;
   }
+  if (key == "progress_format") {
+    config.progress_format = raw_value;
+    return;
+  }
   if (key == "print_effective_config" || key == "print_config") {
     config.print_effective_config = ParseBool(raw_value, key);
+    return;
+  }
+  if (key == "quiet") {
+    config.quiet = raw_value;
     return;
   }
 
@@ -331,6 +349,7 @@ void ApplyEnvironmentOverrides(RunConfig& config) {
   apply_run("CND_BUDGET_MULTIPLIER", "budget_function_multiplier");
   apply_run("CND_BUDGET_UPPER_BOUND", "budget_upper_bound");
   apply_run("CND_LOADER_VERBOSE", "loader_verbose");
+  apply_run("CND_PROGRESS_FORMAT", "progress_format");
   apply_run("CND_PRINT_CONFIG", "print_effective_config");
 
   apply_metrics("CND_METRICS_ENABLE_TRACE", "enable_trace");
@@ -432,8 +451,10 @@ void PrintHelp() {
     << "  --budget-threshold <value>\n"
     << "  --budget-multiplier <value>\n"
     << "  --budget-upper-bound <value>\n"
+    << "  --progress-format <auto|bar|line|none>  Progress output format (default: auto)\n"
     << "  --loader-verbose <true|false>\n"
-    << "  --print-config <true|false>\n\n"
+    << "  --print-config <true|false>\n"
+    << "  --quiet <auto|true|false>        Quiet mode (auto=quiet when piped, default: auto)\n\n"
     << "Metrics CLI overrides (prefix metrics_):\n"
     << "  --metrics_enable_trace <true|false>\n"
     << "  --metrics_enable_relative_gap <true|false>\n"
@@ -534,6 +555,35 @@ int main(int argc, char** argv) {
     ApplyEnvironmentOverrides(config);
     ApplyCliOverrides(cli, config);
 
+    // Resolve "auto" progress format: use bar for TTY, line for piped stdout
+    if (config.progress_format == "auto") {
+      #ifdef _WIN32
+        config.progress_format = _isatty(_fileno(stdout)) ? "bar" : "line";
+      #else
+        config.progress_format = isatty(STDOUT_FILENO) ? "bar" : "line";
+      #endif
+    }
+
+    // Resolve quiet mode: auto = quiet when stdout is piped
+    bool quiet;
+    if (config.quiet == "true") {
+      quiet = true;
+    } else if (config.quiet == "false") {
+      quiet = false;
+    } else {
+      // auto: quiet when stdout is not a TTY (piped)
+      #ifdef _WIN32
+        quiet = !_isatty(_fileno(stdout));
+      #else
+        quiet = !isatty(STDOUT_FILENO);
+      #endif
+    }
+
+    // When quiet, force line progress format (structured output only)
+    if (quiet) {
+      config.progress_format = "line";
+    }
+
     const fs::path constraints_path = ResolveConstraintsPath(config, project_root);
     if (!fs::exists(constraints_path)) {
       throw std::runtime_error(
@@ -541,7 +591,7 @@ int main(int argc, char** argv) {
       );
     }
 
-    if (config.print_effective_config) {
+    if (config.print_effective_config && !quiet) {
       PrintEffectiveConfig(config, project_root, constraints_path, config_path);
     }
 
@@ -550,7 +600,7 @@ int main(int argc, char** argv) {
     auto approach = CreateApproach(config, network);
 
     TrafficAssignment::DirectedConstraintLoader loader;
-    loader.SetVerbose(config.loader_verbose);
+    loader.SetVerbose(config.loader_verbose && !quiet);
     auto constraints = loader.LoadFromFile(constraints_path.string());
 
     // Exclude flow-insensitive links from optimization:
@@ -567,9 +617,11 @@ int main(int argc, char** argv) {
       }
     }
     int active_count = static_cast<int>(constraints.size()) - excluded_count;
-    std::cout << "      Link filtering: " << excluded_count << " of " << constraints.size()
-              << " links excluded (b ~ 0, power ~ 0, or free_flow_time ~ 0), "
-              << active_count << " active design variables" << std::endl;
+    if (!quiet) {
+      std::cout << "      Link filtering: " << excluded_count << " of " << constraints.size()
+                << " links excluded (b ~ 0, power ~ 0, or free_flow_time ~ 0), "
+                << active_count << " active design variables" << std::endl;
+    }
 
     if (config.step_sections.empty()) {
       throw std::runtime_error(
@@ -587,7 +639,9 @@ int main(int argc, char** argv) {
       steps.push_back(step_config);
     }
 
-    std::cout << "Creating BilevelCND solver..." << std::endl;
+    if (!quiet) {
+      std::cout << "Creating BilevelCND solver..." << std::endl;
+    }
     TrafficAssignment::BilevelCND<long double> cnd(
       network,
       approach,
@@ -598,15 +652,22 @@ int main(int argc, char** argv) {
       config.budget_function_multiplier,
       config.budget_upper_bound,
       config.metrics,
-      config.route_search_threads
+      config.route_search_threads,
+      config.progress_format
     );
 
-    std::cout << "      BilevelCND solver created" << std::endl;
-    std::cout << "      Design variables: " << active_count
-              << " active (" << excluded_count << " excluded of "
-              << constraints.size() << " total)" << std::endl;
+    cnd.SetVerbose(!quiet);
 
-    std::cout << "\nRunning bilevel optimization..." << std::endl;
+    if (!quiet) {
+      std::cout << "      BilevelCND solver created" << std::endl;
+      std::cout << "      Design variables: " << active_count
+                << " active (" << excluded_count << " excluded of "
+                << constraints.size() << " total)" << std::endl;
+    }
+
+    if (!quiet) {
+      std::cout << "\nRunning bilevel optimization..." << std::endl;
+    }
 
     cnd.ComputeNetworkDesign();
     return 0;

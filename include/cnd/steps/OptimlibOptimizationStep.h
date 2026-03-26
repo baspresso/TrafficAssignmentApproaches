@@ -122,7 +122,7 @@ public:
       ? pop_size * config_.max_iterations
       : config_.max_iterations;
 
-    progress_.Start(total_evals);
+    progress_.Start(total_evals, GetName(), ctx.progress_format);
     eval_count_ = 0;
 
     auto obj_fn = [](const Eigen::VectorXd& vals_inp,

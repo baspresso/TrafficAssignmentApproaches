@@ -94,7 +94,7 @@ public:
     const bool stochastic = !estimator_->IsDeterministic();
     const int ls_evals = stochastic ? 1 : 3;  // stochastic: no line search, just 1 step eval
     const int total_evals_estimate = config_.max_iterations * (evals_per_grad + ls_evals);
-    progress_.Start(total_evals_estimate);
+    progress_.Start(total_evals_estimate, GetName(), ctx.progress_format);
 
     std::vector<long double> grad(n_vars);
 

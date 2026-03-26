@@ -122,7 +122,7 @@ public:
 
     double minf;
 
-    progress_.Start(config_.max_iterations);
+    progress_.Start(config_.max_iterations, GetName(), ctx.progress_format);
     eval_count_ = 0;
     hard_budget_enabled_ = hard_budget;
 

@@ -30,6 +30,52 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+try:
+    from tqdm import tqdm as _tqdm
+except ImportError:
+    _tqdm = None
+
+
+class _SimpleProgressBar:
+    """Fallback progress bar using \\r-based rendering (duck-types tqdm interface)."""
+
+    def __init__(self, total: int, desc: str = "", unit: str = "it", **kwargs):
+        self.total = max(total, 1)
+        self.desc = desc
+        self.unit = unit
+        self.n = 0
+        self._postfix = {}
+        self._start_time = time.time()
+        self._render()
+
+    def update(self, n: int = 1):
+        self.n = min(self.n + n, self.total)
+        self._render()
+
+    def set_postfix(self, d: dict):
+        self._postfix = d
+        self._render()
+
+    def close(self):
+        self.n = self.total
+        self._render()
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+    def _render(self):
+        elapsed = time.time() - self._start_time
+        pct = self.n / self.total * 100
+        rate = self.n / elapsed if elapsed > 0 else 0
+        bar_width = 30
+        filled = int(bar_width * self.n / self.total)
+        bar = "#" * filled + "-" * (bar_width - filled)
+        postfix_str = ""
+        if self._postfix:
+            postfix_str = " " + ", ".join(f"{k}={v}" for k, v in self._postfix.items())
+        line = f"\r  {self.desc}: {pct:5.1f}% |{bar}| {self.n}/{self.total} [{elapsed:.0f}s {rate:.1f}{self.unit}/s]{postfix_str}"
+        sys.stdout.write(line)
+        sys.stdout.flush()
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EXE_PATH = PROJECT_ROOT / "build" / "mingw-vcpkg-release" / "cndp_solver.exe"
@@ -301,6 +347,54 @@ def generate_scenario_config(
     return config_path
 
 
+def _parse_structured_line(line: str) -> dict | None:
+    """Parse structured [TAG] key=value lines emitted by C++ executables."""
+    for tag in ("[PROGRESS]", "[STEP_START]", "[STEP_END]", "[RESULT]", "[WARN]"):
+        if line.startswith(tag + " ") or line == tag:
+            payload = line[len(tag):].strip()
+            pairs = dict(p.split("=", 1) for p in payload.split() if "=" in p)
+            return {"type": tag[1:-1].lower(), **pairs}
+    return None
+
+
+class _ProgressRenderer:
+    """Renders structured [PROGRESS] lines as tqdm bars, with fallback to plain text."""
+
+    def __init__(self):
+        self.bar = None
+
+    def handle(self, event: dict):
+        if event["type"] == "step_start":
+            if self.bar:
+                self.bar.close()
+            total = int(event.get("total", 0))
+            desc = event.get("step", "")
+            bar_cls = _tqdm if _tqdm is not None else _SimpleProgressBar
+            self.bar = bar_cls(total=total, desc=desc, unit="it", dynamic_ncols=True)
+        elif event["type"] == "progress":
+            current = int(event.get("current", 0))
+            if self.bar is not None:
+                self.bar.update(current - self.bar.n)
+                postfix = {}
+                for k in ("objective", "ttt", "budget"):
+                    if k in event:
+                        try:
+                            postfix[k] = f"{float(event[k]):.2f}"
+                        except (ValueError, TypeError):
+                            pass
+                if postfix:
+                    self.bar.set_postfix(postfix)
+        elif event["type"] == "step_end":
+            if self.bar:
+                self.bar.close()
+            self.bar = None
+
+    def close(self):
+        if self.bar:
+            self.bar.close()
+            self.bar = None
+
+
 def run_scenario(
     dataset: str,
     scenario: Scenario,
@@ -313,6 +407,7 @@ def run_scenario(
         str(EXE_PATH),
         "--config", str(config_path),
         "--metrics_scenario_name", scenario.name,
+        "--quiet", "true",
     ]
     if run_dir is not None:
         cmd += [
@@ -329,7 +424,7 @@ def run_scenario(
     start_time = time.time()
 
     try:
-        # Stream output live so user can see progress bars and metrics
+        # Stream output live, rendering progress bars via tqdm
         process = subprocess.Popen(
             cmd,
             cwd=str(PROJECT_ROOT),
@@ -340,12 +435,24 @@ def run_scenario(
         )
 
         stdout_lines = []
-        # Read stdout line by line, printing live and collecting for parsing
+        result_dict = None
+        renderer = _ProgressRenderer()
+
+        # Read stdout line by line, intercepting structured lines
         for line in process.stdout:
+            stripped = line.rstrip()
+            event = _parse_structured_line(stripped)
+            if event is not None:
+                if event["type"] == "result":
+                    result_dict = event
+                else:
+                    renderer.handle(event)
+                continue
             sys.stdout.write(line)
             sys.stdout.flush()
-            stdout_lines.append(line.rstrip())
+            stdout_lines.append(stripped)
 
+        renderer.close()
         process.wait(timeout=time_limit)
         elapsed = time.time() - start_time
 
@@ -353,19 +460,23 @@ def run_scenario(
         if stderr_text.strip():
             sys.stderr.write(stderr_text)
 
+        # Parse final results from [RESULT] line
         final_objective = None
         final_travel_time = None
         final_budget = None
-        for line in stdout_lines:
-            if "optimization_time" in line:
-                parts = line.strip().split()
-                for part in parts:
-                    if part.startswith("objective_function="):
-                        final_objective = float(part.split("=")[1])
-                    elif part.startswith("total_travel_time="):
-                        final_travel_time = float(part.split("=")[1])
-                    elif part.startswith("budget_function="):
-                        final_budget = float(part.split("=")[1])
+        if result_dict:
+            try:
+                final_objective = float(result_dict.get("objective_function", ""))
+            except (ValueError, TypeError):
+                pass
+            try:
+                final_travel_time = float(result_dict.get("total_travel_time", ""))
+            except (ValueError, TypeError):
+                pass
+            try:
+                final_budget = float(result_dict.get("budget_function", ""))
+            except (ValueError, TypeError):
+                pass
 
         return {
             "scenario": scenario.name,

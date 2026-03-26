@@ -45,7 +45,9 @@ public:
   void Execute(CndOptimizationContext<T>& ctx) {
     for (std::size_t i = 0; i < steps_.size(); ++i) {
       auto& step = steps_[i];
-      std::cout << step->GetName() << "-start\n";
+      if (ctx.verbose) {
+        std::cout << step->GetName() << "-start\n";
+      }
       StepResult result = step->Execute(ctx);
 
       // Post-step: TA computation for consistency + log quality time point
