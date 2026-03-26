@@ -8,7 +8,7 @@ namespace TrafficAssignment {
 /**
  * @brief Configuration for a single optimization step in the CNDP pipeline.
  *
- * Each [step.N] INI section maps to one OptimizationStepConfig. The pipeline
+ * Each [[pipeline]] TOML entry maps to one OptimizationStepConfig. The pipeline
  * executes steps sequentially, passing the best capacities forward as warm start.
  */
 struct OptimizationStepConfig {

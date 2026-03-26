@@ -17,6 +17,8 @@
 
 namespace TrafficAssignment {
 
+struct DirectedLinkCapacityConstraint;  // forward declaration (defined in DirectedConstraintLoader.h)
+
 /**
  * @brief Configuration for CNDP metrics collection and output.
  */

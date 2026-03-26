@@ -1,0 +1,7 @@
+[network]
+dataset = "ChicagoSketch"
+
+[solver]
+approach = "Tapas"
+approach_alpha = 1e-14
+max_standard_iterations = 1000

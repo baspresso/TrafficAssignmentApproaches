@@ -25,6 +25,14 @@ import re
 import sys
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        tomllib = None
+
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -45,18 +53,41 @@ matplotlib.rcParams.update({
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-SCENARIO_STYLES = {
-    "OptCond": {"color": "#d62728", "linestyle": "-", "linewidth": 1.5},
-    "COBYLA": {"color": "#1f77b4", "linestyle": "-", "linewidth": 1.5},
-    "BOBYQA": {"color": "#17becf", "linestyle": "-", "linewidth": 1.5},
-    "GD": {"color": "#ff7f0e", "linestyle": "-", "linewidth": 1.5},
-    "DE": {"color": "#e377c2", "linestyle": "-", "linewidth": 1.5},
-    "PSO": {"color": "#7f7f7f", "linestyle": "-", "linewidth": 1.5},
-    "COBYLA-then-OptCond": {"color": "#2ca02c", "linestyle": "-", "linewidth": 1.5},
-    "OptCond-then-COBYLA": {"color": "#8c564b", "linestyle": "-.", "linewidth": 1.5},
-    "DE-then-OptCond": {"color": "#9467bd", "linestyle": "--", "linewidth": 1.5},
-    #"GD": {"color": "#d62728", "linestyle": "-", "linewidth": 1.5},
-}
+AUTO_PALETTE = [
+    "#1f77b4", "#d62728", "#2ca02c", "#ff7f0e", "#9467bd",
+    "#8c564b", "#e377c2", "#17becf", "#bcbd22", "#7f7f7f",
+]
+AUTO_LINESTYLES = ["-", "--", "-.", ":"]
+
+_manifest_styles: dict[str, dict] = {}
+
+
+def load_manifest_styles(run_dir: Path):
+    """Load per-scenario styles from comparison TOML manifest in run_dir/configs/."""
+    global _manifest_styles
+    _manifest_styles = {}
+    if tomllib is None:
+        return
+    configs_dir = run_dir / "configs"
+    if not configs_dir.exists():
+        return
+    for toml_path in sorted(configs_dir.glob("*.toml")):
+        try:
+            with open(toml_path, "rb") as f:
+                config = tomllib.load(f)
+        except Exception:
+            continue
+        if "comparison" not in config or "scenarios" not in config:
+            continue  # skip per-scenario TOMLs
+        for scenario in config["scenarios"]:
+            name = scenario.get("name", "")
+            style = {}
+            for key in ("color", "linestyle", "linewidth"):
+                if key in scenario:
+                    style[key] = scenario[key]
+            if style:
+                _manifest_styles[name] = style
+        break  # first comparison manifest only
 
 # Network sizes for cross-dataset plots
 NETWORK_LINKS = {"SiouxFalls": 76, "Anaheim": 914}
@@ -210,11 +241,24 @@ def compute_best_so_far(series: pd.Series) -> pd.Series:
     return best
 
 
-def get_style(scenario_name: str) -> dict:
-    """Get plot style for a scenario."""
-    return SCENARIO_STYLES.get(scenario_name, {
-        "color": "gray", "linestyle": "-", "linewidth": 1.0,
-    })
+def get_style(scenario_name: str, index: int = -1) -> dict:
+    """Resolve style: manifest -> auto-palette -> hash fallback."""
+    base_name = re.sub(r"_run\d+$", "", scenario_name)
+
+    if index >= 0:
+        idx = index
+    else:
+        idx = hash(base_name) % len(AUTO_PALETTE)
+
+    style = {
+        "color": AUTO_PALETTE[idx % len(AUTO_PALETTE)],
+        "linestyle": AUTO_LINESTYLES[(idx // len(AUTO_PALETTE)) % len(AUTO_LINESTYLES)],
+        "linewidth": 1.5,
+    }
+    # Manifest overrides
+    manifest = _manifest_styles.get(scenario_name) or _manifest_styles.get(base_name, {})
+    style.update(manifest)
+    return style
 
 
 def exclude_etalon(traces: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
@@ -244,11 +288,11 @@ def plot_objective_vs_time(traces: dict[str, pd.DataFrame], dataset: str, fig_di
 
     _add_etalon_reference(ax, etalon_obj)
 
-    for scenario_name, df in sorted(plot_traces.items()):
+    for i, (scenario_name, df) in enumerate(sorted(plot_traces.items())):
         feasible = filter_budget_feasible(df)
         if feasible.empty:
             continue
-        style = get_style(scenario_name)
+        style = get_style(scenario_name, index=i)
         ax.plot(
             feasible["ElapsedTime(s)"],
             feasible["Objective"],
@@ -276,13 +320,13 @@ def plot_best_so_far(traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Pat
 
     _add_etalon_reference(ax, etalon_obj)
 
-    for scenario_name, df in sorted(plot_traces.items()):
+    for i, (scenario_name, df) in enumerate(sorted(plot_traces.items())):
         feasible = filter_budget_feasible(df)
         if feasible.empty:
             continue
 
         best_envelope = compute_best_so_far(feasible["Objective"])
-        style = get_style(scenario_name)
+        style = get_style(scenario_name, index=i)
         ax.step(
             feasible["ElapsedTime(s)"],
             best_envelope,
@@ -318,7 +362,7 @@ def plot_optimality_gap_vs_evaluations(
     plot_traces = exclude_etalon(traces)
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    for scenario_name, df in sorted(plot_traces.items()):
+    for i, (scenario_name, df) in enumerate(sorted(plot_traces.items())):
         feasible = filter_budget_feasible(df)
         if feasible.empty:
             continue
@@ -331,7 +375,7 @@ def plot_optimality_gap_vs_evaluations(
             continue
 
         eval_idx = np.arange(len(feasible))
-        style = get_style(scenario_name)
+        style = get_style(scenario_name, index=i)
         ax.plot(
             eval_idx[valid],
             np.log10(gap[valid]),
@@ -363,7 +407,7 @@ def plot_absolute_gap_vs_time(
     plot_traces = exclude_etalon(traces)
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    for scenario_name, df in sorted(plot_traces.items()):
+    for i, (scenario_name, df) in enumerate(sorted(plot_traces.items())):
         feasible = filter_budget_feasible(df)
         if feasible.empty:
             continue
@@ -374,7 +418,7 @@ def plot_absolute_gap_vs_time(
         if not valid.any():
             continue
 
-        style = get_style(scenario_name)
+        style = get_style(scenario_name, index=i)
         ax.plot(
             feasible["ElapsedTime(s)"][valid],
             np.log10(gap[valid]),
@@ -406,7 +450,7 @@ def plot_absolute_gap_vs_evaluations(
     plot_traces = exclude_etalon(traces)
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    for scenario_name, df in sorted(plot_traces.items()):
+    for i, (scenario_name, df) in enumerate(sorted(plot_traces.items())):
         feasible = filter_budget_feasible(df)
         if feasible.empty:
             continue
@@ -418,7 +462,7 @@ def plot_absolute_gap_vs_evaluations(
             continue
 
         eval_idx = np.arange(len(feasible))
-        style = get_style(scenario_name)
+        style = get_style(scenario_name, index=i)
         ax.plot(
             eval_idx[valid],
             np.log10(gap[valid]),
@@ -478,10 +522,10 @@ def plot_budget_utilization(
             zorder=1,
         )
 
-    for scenario_name, df in sorted(plot_traces.items()):
+    for i, (scenario_name, df) in enumerate(sorted(plot_traces.items())):
         if "Budget" not in df.columns:
             continue
-        style = get_style(scenario_name)
+        style = get_style(scenario_name, index=i)
         ax.plot(
             df["ElapsedTime(s)"],
             df["Budget"],
@@ -523,7 +567,7 @@ def plot_convergence_character(traces: dict[str, pd.DataFrame], dataset: str, fi
             axes[0].plot(
                 range(len(feasible)),
                 feasible["Objective"].values,
-                color="#d62728",
+                color=get_style("OptCond-only")["color"],
                 linewidth=1.5,
             )
     axes[0].set_xlabel("Iteration")
@@ -538,7 +582,7 @@ def plot_convergence_character(traces: dict[str, pd.DataFrame], dataset: str, fi
             axes[1].plot(
                 range(len(feasible)),
                 feasible["Objective"].values,
-                color="#1f77b4",
+                color=get_style("COBYLA-only")["color"],
                 linewidth=1.0,
             )
     axes[1].set_xlabel("Iteration")
@@ -602,7 +646,7 @@ def plot_sensitivity_sweeps(traces: dict[str, pd.DataFrame], dataset: str, fig_d
                 best_objs.append(best)
             else:
                 best_objs.append(np.nan)
-        ax.plot(iters, best_objs, "o-", color="#d62728", linewidth=1.5, markersize=6)
+        ax.plot(iters, best_objs, "o-", color=get_style("OptCond-only")["color"], linewidth=1.5, markersize=6)
         ax.set_xlabel("OptCond Iterations")
         ax.set_ylabel("Best Feasible Objective")
         ax.set_title("OptCond Iteration Sweep")
@@ -621,7 +665,7 @@ def plot_sensitivity_sweeps(traces: dict[str, pd.DataFrame], dataset: str, fig_d
                 best_objs.append(best)
             else:
                 best_objs.append(np.nan)
-        ax.plot(iters, best_objs, "s-", color="#1f77b4", linewidth=1.5, markersize=6)
+        ax.plot(iters, best_objs, "s-", color=get_style("COBYLA-only")["color"], linewidth=1.5, markersize=6)
         ax.set_xlabel("COBYLA Iterations")
         ax.set_ylabel("Best Feasible Objective")
         ax.set_title("COBYLA Iteration Sweep")
@@ -642,7 +686,7 @@ def plot_sensitivity_sweeps(traces: dict[str, pd.DataFrame], dataset: str, fig_d
             else:
                 best_objs.append(np.nan)
             labels.append(name.replace("Hybrid-", ""))
-        ax.plot(fracs, best_objs, "D-", color="#2ca02c", linewidth=1.5, markersize=6)
+        ax.plot(fracs, best_objs, "D-", color=get_style("COBYLA-then-OptCond")["color"], linewidth=1.5, markersize=6)
         ax.set_xlabel("NLopt Fraction of Total Iterations")
         ax.set_ylabel("Best Feasible Objective")
         ax.set_title("Hybrid Ratio Sweep")
@@ -668,7 +712,7 @@ def plot_multi_run(traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Path)
 
     _add_etalon_reference(ax, etalon_obj)
 
-    for base_name, run_names in sorted(groups.items()):
+    for i, (base_name, run_names) in enumerate(sorted(groups.items())):
         dfs = []
         for name in run_names:
             feasible = filter_budget_feasible(traces[name])
@@ -684,7 +728,7 @@ def plot_multi_run(traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Path)
         x_grid, mean_y, std_y = interpolate_to_common_grid(
             dfs, "ElapsedTime(s)", "BestObj"
         )
-        style = get_style(base_name)
+        style = get_style(base_name, index=i)
         color = style.get("color", "gray")
         ax.plot(x_grid, mean_y, label=f"{base_name} (n={len(dfs)})", color=color, linewidth=1.5)
         ax.fill_between(x_grid, mean_y - std_y, mean_y + std_y, color=color, alpha=0.2)
@@ -706,7 +750,7 @@ def plot_ta_compute_time(traces: dict[str, pd.DataFrame], dataset: str, fig_dir:
     plot_traces = exclude_etalon(traces)
     data = []
     labels = []
-    for scenario_name, df in sorted(plot_traces.items()):
+    for i, (scenario_name, df) in enumerate(sorted(plot_traces.items())):
         if "TAComputeTime(s)" not in df.columns:
             continue
         vals = df["TAComputeTime(s)"].dropna()
@@ -722,7 +766,7 @@ def plot_ta_compute_time(traces: dict[str, pd.DataFrame], dataset: str, fig_dir:
     fig, ax = plt.subplots(figsize=(10, 6))
     bp = ax.boxplot(data, labels=labels, patch_artist=True, vert=True)
     for i, box in enumerate(bp["boxes"]):
-        style = get_style(labels[i])
+        style = get_style(labels[i], index=i)
         box.set_facecolor(style.get("color", "gray"))
         box.set_alpha(0.6)
     ax.set_ylabel("TA Compute Time (s)")
@@ -1222,6 +1266,7 @@ def main():
     # Run-dir mode: self-contained folder
     if args.run_dir:
         run_dir = Path(args.run_dir)
+        load_manifest_styles(run_dir)
         dataset = args.dataset or "SiouxFalls"
         print(f"Loading traces from run folder: {run_dir}")
         traces = load_trace_files_from_run_dir(run_dir)

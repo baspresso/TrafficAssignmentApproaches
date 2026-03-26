@@ -1,0 +1,61 @@
+[comparison]
+description = "SiouxFalls CNDP Algorithm Comparison"
+time_limit = 1800
+etalon_time_limit = 7200
+
+[defaults.network]
+dataset = "SiouxFalls"
+
+[defaults.solver]
+approach = "Tapas"
+approach_alpha = 1e-14
+budget_function_multiplier = 5.0
+budget_upper_bound = 100_000.0
+
+[defaults.metrics]
+enable_trace = true
+write_metadata_json = true
+write_summary_csv = true
+flush_every_n_points = 10
+
+# --- Etalon ---
+
+[[scenarios]]
+name = "Etalon"
+description = "Reference solution (COBYLA 1000)"
+etalon = true
+[[scenarios.pipeline]]
+type = "nlopt"
+algorithm = "LN_COBYLA"
+max_iterations = 1000
+tolerance = 1e-4
+
+# --- Single-algorithm scenarios ---
+
+[[scenarios]]
+name = "COBYLA-only"
+description = "COBYLA 500 iterations"
+color = "#1f77b4"
+[[scenarios.pipeline]]
+type = "nlopt"
+algorithm = "LN_COBYLA"
+max_iterations = 500
+tolerance = 1e-4
+
+[[scenarios]]
+name = "BOBYQA-only"
+description = "BOBYQA 800 iterations"
+color = "#17becf"
+[[scenarios.pipeline]]
+type = "nlopt"
+algorithm = "LN_BOBYQA"
+max_iterations = 800
+tolerance = 1e-4
+
+[[scenarios]]
+name = "OptCond-only"
+description = "Optimality condition 35 iterations"
+color = "#d62728"
+[[scenarios.pipeline]]
+type = "optimality_condition"
+max_iterations = 60

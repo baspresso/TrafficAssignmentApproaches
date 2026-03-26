@@ -1,11 +1,8 @@
 #include <filesystem>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <map>
 #include <memory>
 #include <optional>
-#include <regex>
 #include <stdexcept>
 #include <string>
 
@@ -16,10 +13,9 @@
   #include <unistd.h>
 #endif
 
-#include "../include/common/ConfigUtils.h"
+#include "../include/common/TomlConfigLoader.h"
 #include "../include/cnd/BilevelCND.h"
 #include "../include/cnd/DirectedConstraintLoader.h"
-#include "../include/cnd/OptimizationStep.h"
 #include "../include/tap/algorithms/route_based/RouteBasedApproach.h"
 #include "../include/tap/algorithms/tapas/TapasApproach.h"
 #include "../include/tap/core/NetworkBuilder.h"
@@ -27,382 +23,44 @@
 namespace fs = std::filesystem;
 
 using namespace TrafficAssignment::ConfigUtils;
+using namespace TrafficAssignment::Config;
 
 namespace {
 
-struct RunConfig {
-  std::string dataset = "SiouxFalls";
-  std::string constraints_file;
-  std::string approach = "RouteBased";
-  long double approach_alpha = 1e-14L;
-  std::string shift_method = "NewtonStep";
-  std::size_t route_search_threads = 1;
-
-  // TAP approach tuning (0 = use approach default)
-  int max_standard_iterations = 0;
-  int full_iteration_count = 0;        // RouteBased-specific
-  int origin_iteration_count = 0;      // RouteBased-specific
-  long double ema_alpha = 0.0L;        // RouteBased-specific
-  int pas_per_origin = 0;              // Tapas-specific
-  int pas_multiplier = 0;              // Tapas-specific
-  int rgap_check_interval = 0;         // Tapas-specific (0 = use default)
-  long double tapas_mu = 0.0L;         // Tapas PAS cost-effectiveness (0 = use default 0.5)
-  long double tapas_v = 0.0L;          // Tapas PAS flow-effectiveness (0 = use default 0.25)
-
-  long double link_capacity_selection_threshold = 1e-3L;
-  long double budget_threshold = 1e-1L;
-  long double budget_function_multiplier = 5.0L;
-  double budget_upper_bound = 100000.0;
-
-  std::string progress_format = "auto";
-
-  bool loader_verbose = true;
-  bool print_effective_config = true;
-  std::string quiet = "auto";  // auto | true | false
-  TrafficAssignment::CndMetricsConfig metrics;
-
-  // Pipeline step configs parsed from [step.N] sections
-  std::map<int, TrafficAssignment::OptimizationStepConfig> step_sections;
-};
-
-
-void ApplyRunOption(RunConfig& config,
-                    const std::string& raw_key,
-                    const std::string& raw_value) {
-  const std::string key = NormalizeKey(raw_key);
-  if (key == "dataset") {
-    config.dataset = raw_value;
-    return;
+fs::path ResolveConstraintsPath(const CndpConfig& config, const fs::path& project_root) {
+  if (config.network.constraints_file.empty()) {
+    return project_root / "data" / "TransportationNetworks" / config.network.dataset /
+           (config.network.dataset + "_constraints.csv");
   }
-  if (key == "constraints_file" || key == "constraints_path" || key == "constraints") {
-    config.constraints_file = raw_value;
-    return;
-  }
-  if (key == "approach" || key == "approach_type") {
-    config.approach = raw_value;
-    return;
-  }
-  if (key == "approach_alpha" || key == "alpha") {
-    config.approach_alpha = ParseNumber<long double>(raw_value, key);
-    return;
-  }
-  if (key == "shift_method") {
-    config.shift_method = raw_value;
-    return;
-  }
-  if (key == "route_search_threads" || key == "route_threads") {
-    config.route_search_threads = ParseNumber<std::size_t>(raw_value, key);
-    return;
-  }
-  if (key == "max_standard_iterations" || key == "max_iters") {
-    config.max_standard_iterations = ParseNumber<int>(raw_value, key);
-    return;
-  }
-  if (key == "full_iteration_count") {
-    config.full_iteration_count = ParseNumber<int>(raw_value, key);
-    return;
-  }
-  if (key == "origin_iteration_count") {
-    config.origin_iteration_count = ParseNumber<int>(raw_value, key);
-    return;
-  }
-  if (key == "ema_alpha") {
-    config.ema_alpha = ParseNumber<long double>(raw_value, key);
-    return;
-  }
-  if (key == "pas_per_origin") {
-    config.pas_per_origin = ParseNumber<int>(raw_value, key);
-    return;
-  }
-  if (key == "pas_multiplier") {
-    config.pas_multiplier = ParseNumber<int>(raw_value, key);
-    return;
-  }
-  if (key == "rgap_check_interval") {
-    config.rgap_check_interval = ParseNumber<int>(raw_value, key);
-    return;
-  }
-  if (key == "tapas_mu" || key == "mu") {
-    config.tapas_mu = ParseNumber<long double>(raw_value, key);
-    return;
-  }
-  if (key == "tapas_v" || key == "v") {
-    config.tapas_v = ParseNumber<long double>(raw_value, key);
-    return;
-  }
-  if (key == "link_capacity_selection_threshold" || key == "link_threshold") {
-    config.link_capacity_selection_threshold = ParseNumber<long double>(raw_value, key);
-    return;
-  }
-  if (key == "budget_threshold") {
-    config.budget_threshold = ParseNumber<long double>(raw_value, key);
-    return;
-  }
-  if (key == "budget_function_multiplier" || key == "budget_multiplier") {
-    config.budget_function_multiplier = ParseNumber<long double>(raw_value, key);
-    return;
-  }
-  if (key == "budget_upper_bound") {
-    config.budget_upper_bound = ParseNumber<double>(raw_value, key);
-    return;
-  }
-  if (key == "loader_verbose") {
-    config.loader_verbose = ParseBool(raw_value, key);
-    return;
-  }
-  if (key == "progress_format") {
-    config.progress_format = raw_value;
-    return;
-  }
-  if (key == "print_effective_config" || key == "print_config") {
-    config.print_effective_config = ParseBool(raw_value, key);
-    return;
-  }
-  if (key == "quiet") {
-    config.quiet = raw_value;
-    return;
-  }
-
-  throw std::runtime_error("Unknown run option: '" + raw_key + "'");
-}
-
-void ApplyMetricsOption(RunConfig& config,
-                        const std::string& raw_key,
-                        const std::string& raw_value) {
-  const std::string key = NormalizeKey(raw_key);
-  if (key == "enable_trace") {
-    config.metrics.enable_trace = ParseBool(raw_value, key);
-    return;
-  }
-  if (key == "enable_relative_gap") {
-    config.metrics.enable_relative_gap = ParseBool(raw_value, key);
-    return;
-  }
-  if (key == "relative_gap_sample_period") {
-    config.metrics.relative_gap_sample_period = ParseNumber<int>(raw_value, key);
-    return;
-  }
-  if (key == "flush_every_n_points") {
-    config.metrics.flush_every_n_points = ParseNumber<int>(raw_value, key);
-    return;
-  }
-  if (key == "write_metadata_json") {
-    config.metrics.write_metadata_json = ParseBool(raw_value, key);
-    return;
-  }
-  if (key == "write_summary_csv") {
-    config.metrics.write_summary_csv = ParseBool(raw_value, key);
-    return;
-  }
-  if (key == "output_root") {
-    config.metrics.output_root = raw_value;
-    return;
-  }
-  if (key == "run_id") {
-    config.metrics.run_id = raw_value;
-    return;
-  }
-  if (key == "scenario_name" || key == "scenario") {
-    config.metrics.scenario_name = raw_value;
-    return;
-  }
-  if (key == "no_dataset_subdir") {
-    config.metrics.append_dataset_subdir = !ParseBool(raw_value, key);
-    return;
-  }
-
-  throw std::runtime_error("Unknown metrics option: '" + raw_key + "'");
-}
-
-void ApplyStepOption(TrafficAssignment::OptimizationStepConfig& step,
-                     const std::string& raw_key,
-                     const std::string& raw_value) {
-  const std::string key = NormalizeKey(raw_key);
-  if (key == "type") {
-    step.type = raw_value;
-  } else if (key == "name") {
-    step.name = raw_value;
-  } else if (key == "max_iterations" || key == "max_iters") {
-    step.max_iterations = ParseNumber<int>(raw_value, key);
-  } else if (key == "tolerance") {
-    step.tolerance = ParseNumber<double>(raw_value, key);
-  } else if (key == "algorithm") {
-    step.algorithm = raw_value;
-  } else if (key == "local_algorithm") {
-    step.local_algorithm = raw_value;
-  } else if (key == "local_max_iterations" || key == "local_max_iters") {
-    step.local_max_iterations = ParseNumber<int>(raw_value, key);
-  } else if (key == "local_tolerance") {
-    step.local_tolerance = ParseNumber<double>(raw_value, key);
-  } else if (key == "population_size") {
-    step.population_size = ParseNumber<int>(raw_value, key);
-  } else if (key == "step_size" || key == "initial_step_size") {
-    step.step_size = ParseNumber<double>(raw_value, key);
-  } else if (key == "fd_epsilon" || key == "finite_diff_epsilon") {
-    step.fd_epsilon = ParseNumber<double>(raw_value, key);
-  } else if (key == "gradient_method" || key == "gradient_estimator") {
-    step.gradient_method = raw_value;
-  } else if (key == "stochastic_optimizer" || key == "optimizer") {
-    step.stochastic_optimizer = raw_value;
-  } else {
-    throw std::runtime_error("Unknown step option: '" + raw_key + "'");
-  }
-}
-
-fs::path ResolveConstraintsPath(const RunConfig& config, const fs::path& project_root) {
-  if (config.constraints_file.empty()) {
-    return project_root / "data" / "TransportationNetworks" / config.dataset /
-           (config.dataset + "_constraints.csv");
-  }
-  return ResolvePath(fs::path(config.constraints_file), project_root);
-}
-
-void ApplyConfigFile(const fs::path& config_path, RunConfig& config) {
-  if (!fs::exists(config_path)) {
-    throw std::runtime_error("Config file does not exist: " + config_path.string());
-  }
-
-  std::ifstream file(config_path);
-  if (!file.is_open()) {
-    throw std::runtime_error("Failed to open config file: " + config_path.string());
-  }
-
-  std::string line;
-  std::string current_section;
-  int current_step_index = -1;
-  int line_number = 0;
-  const std::regex step_pattern(R"(step\.(\d+))");
-  while (std::getline(file, line)) {
-    ++line_number;
-    const std::string trimmed = TrimCopy(line);
-    if (trimmed.empty() || trimmed[0] == '#' || trimmed[0] == ';') {
-      continue;
-    }
-
-    if (trimmed.front() == '[' && trimmed.back() == ']') {
-      current_section = ToLowerCopy(TrimCopy(trimmed.substr(1, trimmed.size() - 2)));
-      current_step_index = -1;
-      std::smatch match;
-      if (std::regex_match(current_section, match, step_pattern)) {
-        current_step_index = std::stoi(match[1].str());
-        if (config.step_sections.find(current_step_index) == config.step_sections.end()) {
-          config.step_sections[current_step_index] = TrafficAssignment::OptimizationStepConfig();
-        }
-      }
-      continue;
-    }
-
-    const auto eq_pos = trimmed.find('=');
-    if (eq_pos == std::string::npos) {
-      throw std::runtime_error(
-        "Invalid config line " + std::to_string(line_number) + " in " +
-        config_path.string() + ": expected key=value format."
-      );
-    }
-
-    const std::string key = TrimCopy(trimmed.substr(0, eq_pos));
-    const std::string value = TrimCopy(trimmed.substr(eq_pos + 1));
-    if (current_section == "run") {
-      ApplyRunOption(config, key, value);
-    } else if (current_section == "metrics") {
-      ApplyMetricsOption(config, key, value);
-    } else if (current_step_index >= 0) {
-      ApplyStepOption(config.step_sections[current_step_index], key, value);
-    } else {
-      throw std::runtime_error(
-        "Unsupported config section '" + current_section + "' at line " +
-        std::to_string(line_number) + " in " + config_path.string()
-      );
-    }
-  }
-}
-
-void ApplyEnvironmentOverrides(RunConfig& config) {
-  auto apply_run = [&config](const char* env_name, const std::string& key) {
-    if (const auto env_value = GetEnvValue(env_name)) {
-      ApplyRunOption(config, key, *env_value);
-    }
-  };
-  auto apply_metrics = [&config](const char* env_name, const std::string& key) {
-    if (const auto env_value = GetEnvValue(env_name)) {
-      ApplyMetricsOption(config, key, *env_value);
-    }
-  };
-
-  apply_run("CND_DATASET", "dataset");
-  apply_run("CND_CONSTRAINTS_FILE", "constraints_file");
-  apply_run("CND_APPROACH", "approach");
-  apply_run("CND_APPROACH_ALPHA", "approach_alpha");
-  apply_run("CND_SHIFT_METHOD", "shift_method");
-  apply_run("CND_ROUTE_THREADS", "route_search_threads");
-  apply_run("CND_MAX_STANDARD_ITERATIONS", "max_standard_iterations");
-  apply_run("CND_FULL_ITERATION_COUNT", "full_iteration_count");
-  apply_run("CND_ORIGIN_ITERATION_COUNT", "origin_iteration_count");
-  apply_run("CND_EMA_ALPHA", "ema_alpha");
-  apply_run("CND_PAS_PER_ORIGIN", "pas_per_origin");
-  apply_run("CND_PAS_MULTIPLIER", "pas_multiplier");
-  apply_run("CND_RGAP_CHECK_INTERVAL", "rgap_check_interval");
-  apply_run("CND_TAPAS_MU", "tapas_mu");
-  apply_run("CND_TAPAS_V", "tapas_v");
-  apply_run("CND_LINK_THRESHOLD", "link_capacity_selection_threshold");
-  apply_run("CND_BUDGET_THRESHOLD", "budget_threshold");
-  apply_run("CND_BUDGET_MULTIPLIER", "budget_function_multiplier");
-  apply_run("CND_BUDGET_UPPER_BOUND", "budget_upper_bound");
-  apply_run("CND_LOADER_VERBOSE", "loader_verbose");
-  apply_run("CND_PROGRESS_FORMAT", "progress_format");
-  apply_run("CND_PRINT_CONFIG", "print_effective_config");
-
-  apply_metrics("CND_METRICS_ENABLE_TRACE", "enable_trace");
-  apply_metrics("CND_METRICS_ENABLE_RELATIVE_GAP", "enable_relative_gap");
-  apply_metrics("CND_METRICS_RELATIVE_GAP_PERIOD", "relative_gap_sample_period");
-  apply_metrics("CND_METRICS_FLUSH_EVERY", "flush_every_n_points");
-  apply_metrics("CND_METRICS_WRITE_METADATA", "write_metadata_json");
-  apply_metrics("CND_METRICS_WRITE_SUMMARY", "write_summary_csv");
-  apply_metrics("CND_METRICS_OUTPUT_ROOT", "output_root");
-  apply_metrics("CND_METRICS_RUN_ID", "run_id");
-  apply_metrics("CND_METRICS_SCENARIO_NAME", "scenario_name");
-  apply_metrics("CND_METRICS_NO_DATASET_SUBDIR", "no_dataset_subdir");
-}
-
-void ApplyCliOverrides(const CliOptions& cli, RunConfig& config) {
-  for (const auto& [raw_key, value] : cli.values) {
-    if (raw_key == "config" || raw_key == "help" || raw_key == "h") {
-      continue;
-    }
-    if (raw_key.rfind("metrics_", 0) == 0) {
-      ApplyMetricsOption(config, raw_key.substr(std::string("metrics_").size()), value);
-      continue;
-    }
-    ApplyRunOption(config, raw_key, value);
-  }
+  return ResolvePath(fs::path(config.network.constraints_file), project_root);
 }
 
 std::shared_ptr<TrafficAssignment::TrafficAssignmentApproach<long double>>
-CreateApproach(const RunConfig& config, TrafficAssignment::Network<long double>& network) {
-  const std::string approach = ToLowerCopy(config.approach);
+CreateApproach(const CndpConfig& config, TrafficAssignment::Network<long double>& network) {
+  const std::string approach = ToLowerCopy(config.solver.approach);
   if (approach == "routebased" || approach == "route_based") {
     return std::make_shared<TrafficAssignment::RouteBasedApproach<long double>>(
       network,
-      config.approach_alpha,
-      config.shift_method,
-      config.route_search_threads,
-      config.max_standard_iterations > 0 ? config.max_standard_iterations : 200,
-      config.full_iteration_count > 0 ? config.full_iteration_count : 3,
-      config.origin_iteration_count > 0 ? config.origin_iteration_count : 1,
-      config.ema_alpha > 0.0L ? config.ema_alpha : 0.7L
+      config.solver.approach_alpha,
+      config.solver.route_based.shift_method,
+      config.solver.route_based.route_search_threads,
+      config.solver.max_standard_iterations > 0 ? config.solver.max_standard_iterations : 200,
+      config.solver.route_based.full_iteration_count > 0 ? config.solver.route_based.full_iteration_count : 3,
+      config.solver.route_based.origin_iteration_count > 0 ? config.solver.route_based.origin_iteration_count : 1,
+      config.solver.route_based.ema_alpha > 0.0L ? config.solver.route_based.ema_alpha : 0.7L
     );
   }
   if (approach == "tapas" || approach == "tasktapas" || approach == "task_tapas" || approach == "task") {
     return std::make_shared<TrafficAssignment::TapasApproach<long double>>(
       network,
-      config.approach_alpha,
-      config.max_standard_iterations > 0 ? config.max_standard_iterations : 200,
-      config.tapas_mu > 0.0L ? config.tapas_mu : 0.5L,
-      config.tapas_v > 0.0L ? config.tapas_v : 0.25L
+      config.solver.approach_alpha,
+      config.solver.max_standard_iterations > 0 ? config.solver.max_standard_iterations : 200,
+      config.solver.tapas.mu > 0.0L ? config.solver.tapas.mu : 0.5L,
+      config.solver.tapas.v > 0.0L ? config.solver.tapas.v : 0.25L
     );
   }
   throw std::runtime_error(
-    "Unsupported approach '" + config.approach +
+    "Unsupported approach '" + config.solver.approach +
     "'. Supported: RouteBased, Tapas."
   );
 }
@@ -410,16 +68,16 @@ CreateApproach(const RunConfig& config, TrafficAssignment::Network<long double>&
 void PrintHelp() {
   std::cout
     << "Usage: cndp_solver.exe --config <path> [options]\n\n"
-    << "Layering: defaults -> config file -> environment -> CLI\n\n"
-    << "Optimization steps are defined via [step.N] sections in the INI config file.\n"
+    << "Layering: defaults -> TOML config file -> environment -> CLI\n\n"
+    << "Optimization steps are defined via [[pipeline]] in the TOML config file.\n"
     << "Example:\n"
-    << "  [step.0]\n"
-    << "  type = nlopt\n"
-    << "  algorithm = LN_COBYLA\n"
+    << "  [[pipeline]]\n"
+    << "  type = \"nlopt\"\n"
+    << "  algorithm = \"LN_COBYLA\"\n"
     << "  max_iterations = 200\n"
     << "  tolerance = 1e-4\n\n"
-    << "  [step.1]\n"
-    << "  type = optimality_condition\n"
+    << "  [[pipeline]]\n"
+    << "  type = \"optimality_condition\"\n"
     << "  max_iterations = 30\n\n"
     << "Step options:\n"
     << "  type                             nlopt | optimality_condition | optimlib | gradient_descent\n"
@@ -434,8 +92,8 @@ void PrintHelp() {
     << "  gradient_method                  Gradient estimator: finite_difference (default), spsa, sensitivity\n"
     << "  stochastic_optimizer             Stochastic optimizer: sgd (default), momentum, adam\n"
     << "  name                             Display name for this step\n\n"
-    << "General options (CLI or [run] section):\n"
-    << "  --config <path>                  INI config file path (required)\n"
+    << "General options (CLI or TOML sections):\n"
+    << "  --config <path>                  TOML config file path (required)\n"
     << "  --dataset <name>                 Dataset name (e.g. SiouxFalls)\n"
     << "  --constraints-file <path>        Constraints CSV path\n"
     << "  --approach <RouteBased|Tapas>\n"
@@ -468,37 +126,37 @@ void PrintHelp() {
     << "  --metrics_no_dataset_subdir <true|false>  Skip dataset subdirectory in output\n";
 }
 
-void PrintEffectiveConfig(const RunConfig& config,
+void PrintEffectiveConfig(const CndpConfig& config,
                           const fs::path& project_root,
                           const fs::path& constraints_path,
                           const std::optional<fs::path>& config_path) {
   std::cout << "\nEffective run configuration:\n";
   std::cout << "  project_root: " << project_root.string() << '\n';
   std::cout << "  config_file: " << (config_path ? config_path->string() : "<none>") << '\n';
-  std::cout << "  dataset: " << config.dataset << '\n';
+  std::cout << "  dataset: " << config.network.dataset << '\n';
   std::cout << "  constraints_file: " << constraints_path.string() << '\n';
-  std::cout << "  approach: " << config.approach << '\n';
-  std::cout << "  shift_method: " << config.shift_method << '\n';
-  std::cout << "  route_search_threads: " << config.route_search_threads << '\n';
-  if (config.max_standard_iterations > 0)
-    std::cout << "  max_standard_iterations: " << config.max_standard_iterations << '\n';
-  if (config.full_iteration_count > 0)
-    std::cout << "  full_iteration_count: " << config.full_iteration_count << '\n';
-  if (config.origin_iteration_count > 0)
-    std::cout << "  origin_iteration_count: " << config.origin_iteration_count << '\n';
-  if (config.ema_alpha > 0.0L)
-    std::cout << "  ema_alpha: " << config.ema_alpha << '\n';
-  if (config.pas_per_origin > 0)
-    std::cout << "  pas_per_origin: " << config.pas_per_origin << '\n';
-  if (config.pas_multiplier > 0)
-    std::cout << "  pas_multiplier: " << config.pas_multiplier << '\n';
-  if (config.rgap_check_interval > 0)
-    std::cout << "  rgap_check_interval: " << config.rgap_check_interval << '\n';
-  if (config.tapas_mu > 0.0L)
-    std::cout << "  tapas_mu: " << config.tapas_mu << '\n';
-  if (config.tapas_v > 0.0L)
-    std::cout << "  tapas_v: " << config.tapas_v << '\n';
-  std::cout << "  budget_upper_bound: " << config.budget_upper_bound << '\n';
+  std::cout << "  approach: " << config.solver.approach << '\n';
+  std::cout << "  shift_method: " << config.solver.route_based.shift_method << '\n';
+  std::cout << "  route_search_threads: " << config.solver.route_based.route_search_threads << '\n';
+  if (config.solver.max_standard_iterations > 0)
+    std::cout << "  max_standard_iterations: " << config.solver.max_standard_iterations << '\n';
+  if (config.solver.route_based.full_iteration_count > 0)
+    std::cout << "  full_iteration_count: " << config.solver.route_based.full_iteration_count << '\n';
+  if (config.solver.route_based.origin_iteration_count > 0)
+    std::cout << "  origin_iteration_count: " << config.solver.route_based.origin_iteration_count << '\n';
+  if (config.solver.route_based.ema_alpha > 0.0L)
+    std::cout << "  ema_alpha: " << config.solver.route_based.ema_alpha << '\n';
+  if (config.solver.tapas.pas_per_origin > 0)
+    std::cout << "  pas_per_origin: " << config.solver.tapas.pas_per_origin << '\n';
+  if (config.solver.tapas.pas_multiplier > 0)
+    std::cout << "  pas_multiplier: " << config.solver.tapas.pas_multiplier << '\n';
+  if (config.solver.tapas.rgap_check_interval > 0)
+    std::cout << "  rgap_check_interval: " << config.solver.tapas.rgap_check_interval << '\n';
+  if (config.solver.tapas.mu > 0.0L)
+    std::cout << "  tapas_mu: " << config.solver.tapas.mu << '\n';
+  if (config.solver.tapas.v > 0.0L)
+    std::cout << "  tapas_v: " << config.solver.tapas.v << '\n';
+  std::cout << "  budget_upper_bound: " << config.solver.budget_upper_bound << '\n';
   std::cout << "  metrics.output_root: " << config.metrics.output_root << '\n';
   if (!config.metrics.append_dataset_subdir) {
     std::cout << "  metrics.no_dataset_subdir: true\n";
@@ -506,9 +164,10 @@ void PrintEffectiveConfig(const RunConfig& config,
   if (!config.metrics.scenario_name.empty()) {
     std::cout << "  metrics.scenario_name: " << config.metrics.scenario_name << '\n';
   }
-  std::cout << "  pipeline steps: " << config.step_sections.size() << '\n';
-  for (const auto& [index, step] : config.step_sections) {
-    std::cout << "    [step." << index << "] type=" << step.type;
+  std::cout << "  pipeline steps: " << config.pipeline.size() << '\n';
+  for (std::size_t i = 0; i < config.pipeline.size(); ++i) {
+    const auto& step = config.pipeline[i];
+    std::cout << "    [[pipeline]] #" << i << " type=" << step.type;
     if (!step.algorithm.empty()) std::cout << " algorithm=" << step.algorithm;
     std::cout << " max_iter=" << step.max_iterations;
     if (step.tolerance > 0) std::cout << " tol=" << step.tolerance;
@@ -538,7 +197,7 @@ int main(int argc, char** argv) {
     }
 
     const fs::path project_root = FindProjectRoot();
-    RunConfig config;
+    CndpConfig config;
 
     std::optional<fs::path> config_path;
     const auto cli_config_it = cli.values.find("config");
@@ -549,26 +208,26 @@ int main(int argc, char** argv) {
     }
 
     if (config_path.has_value()) {
-      ApplyConfigFile(*config_path, config);
+      config = LoadCndpConfig(*config_path);
     }
 
     ApplyEnvironmentOverrides(config);
     ApplyCliOverrides(cli, config);
 
     // Resolve "auto" progress format: use bar for TTY, line for piped stdout
-    if (config.progress_format == "auto") {
+    if (config.output.progress_format == "auto") {
       #ifdef _WIN32
-        config.progress_format = _isatty(_fileno(stdout)) ? "bar" : "line";
+        config.output.progress_format = _isatty(_fileno(stdout)) ? "bar" : "line";
       #else
-        config.progress_format = isatty(STDOUT_FILENO) ? "bar" : "line";
+        config.output.progress_format = isatty(STDOUT_FILENO) ? "bar" : "line";
       #endif
     }
 
     // Resolve quiet mode: auto = quiet when stdout is piped
     bool quiet;
-    if (config.quiet == "true") {
+    if (config.output.quiet == "true") {
       quiet = true;
-    } else if (config.quiet == "false") {
+    } else if (config.output.quiet == "false") {
       quiet = false;
     } else {
       // auto: quiet when stdout is not a TTY (piped)
@@ -581,7 +240,7 @@ int main(int argc, char** argv) {
 
     // When quiet, force line progress format (structured output only)
     if (quiet) {
-      config.progress_format = "line";
+      config.output.progress_format = "line";
     }
 
     const fs::path constraints_path = ResolveConstraintsPath(config, project_root);
@@ -591,21 +250,21 @@ int main(int argc, char** argv) {
       );
     }
 
-    if (config.print_effective_config && !quiet) {
+    if (config.output.print_effective_config && !quiet) {
       PrintEffectiveConfig(config, project_root, constraints_path, config_path);
     }
 
     TrafficAssignment::NetworkBuilder builder;
-    auto network = builder.BuildFromDataset<long double>(config.dataset);
+    auto network = builder.BuildFromDataset<long double>(config.network.dataset);
     auto approach = CreateApproach(config, network);
 
     TrafficAssignment::DirectedConstraintLoader loader;
-    loader.SetVerbose(config.loader_verbose && !quiet);
+    loader.SetVerbose(config.output.verbose && !quiet);
     auto constraints = loader.LoadFromFile(constraints_path.string());
 
     // Exclude flow-insensitive links from optimization:
-    // - b ≈ 0 or power ≈ 0: delay independent of flow/capacity
-    // - free_flow_time ≈ 0: delay always near zero regardless of capacity
+    // - b ~ 0 or power ~ 0: delay independent of flow/capacity
+    // - free_flow_time ~ 0: delay always near zero regardless of capacity
     int excluded_count = 0;
     for (int i = 0; i < static_cast<int>(constraints.size()); ++i) {
       const auto& link = network.links()[i];
@@ -623,20 +282,15 @@ int main(int argc, char** argv) {
                 << active_count << " active design variables" << std::endl;
     }
 
-    if (config.step_sections.empty()) {
+    if (config.pipeline.empty()) {
       throw std::runtime_error(
-        "No [step.N] sections found in config. At least one optimization step "
+        "No [[pipeline]] entries found in config. At least one optimization step "
         "must be defined. Example:\n"
-        "  [step.0]\n"
-        "  type = nlopt\n"
-        "  algorithm = LN_COBYLA\n"
+        "  [[pipeline]]\n"
+        "  type = \"nlopt\"\n"
+        "  algorithm = \"LN_COBYLA\"\n"
         "  max_iterations = 100\n"
       );
-    }
-
-    std::vector<TrafficAssignment::OptimizationStepConfig> steps;
-    for (const auto& [index, step_config] : config.step_sections) {
-      steps.push_back(step_config);
     }
 
     if (!quiet) {
@@ -646,14 +300,14 @@ int main(int argc, char** argv) {
       network,
       approach,
       constraints,
-      steps,
-      config.link_capacity_selection_threshold,
-      config.budget_threshold,
-      config.budget_function_multiplier,
-      config.budget_upper_bound,
+      config.pipeline,
+      config.solver.link_capacity_selection_threshold,
+      config.solver.budget_threshold,
+      config.solver.budget_function_multiplier,
+      config.solver.budget_upper_bound,
       config.metrics,
-      config.route_search_threads,
-      config.progress_format
+      config.solver.route_based.route_search_threads,
+      config.output.progress_format
     );
 
     cnd.SetVerbose(!quiet);

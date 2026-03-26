@@ -1,0 +1,19 @@
+[network]
+dataset = "SiouxFalls"
+
+[solver]
+approach = "Tapas"
+approach_alpha = 1e-14
+budget_function_multiplier = 5.0
+budget_upper_bound = 100_000.0
+
+[metrics]
+enable_trace = true
+write_metadata_json = true
+write_summary_csv = true
+
+[[pipeline]]
+type = "nlopt"
+algorithm = "LN_COBYLA"
+max_iterations = 500
+tolerance = 1e-4

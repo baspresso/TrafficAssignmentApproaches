@@ -1,0 +1,17 @@
+[network]
+dataset = "Winnipeg"
+
+[solver]
+approach = "Tapas"
+approach_alpha = 1e-14
+budget_function_multiplier = 0.001
+budget_upper_bound = 10_000.0
+
+[metrics]
+enable_trace = true
+write_metadata_json = true
+write_summary_csv = true
+
+[[pipeline]]
+type = "optimality_condition"
+max_iterations = 5

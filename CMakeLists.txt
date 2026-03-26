@@ -16,6 +16,15 @@ find_package(Eigen3 REQUIRED)
 find_package(Boost CONFIG REQUIRED COMPONENTS multiprecision)
 find_package(NLopt CONFIG REQUIRED)
 
+# --- toml++ (header-only TOML parser) ---
+FetchContent_Declare(
+    tomlplusplus
+    GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
+    GIT_TAG        v3.4.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(tomlplusplus)
+
 # --- OptimLib (header-only-like usage via compiled static library) ---
 FetchContent_Declare(
     optimlib
@@ -53,6 +62,7 @@ target_link_libraries(cndp_solver PRIVATE
     Boost::multiprecision
     NLopt::nlopt
     optimlib
+    tomlplusplus::tomlplusplus
 )
 
 add_executable(tap_solver src/tap_solver.cpp)
@@ -60,6 +70,7 @@ add_executable(tap_solver src/tap_solver.cpp)
 target_link_libraries(tap_solver PRIVATE
     Eigen3::Eigen
     Boost::multiprecision
+    tomlplusplus::tomlplusplus
 )
 
 # MinGW debug builds hit the COFF section limit on large TUs; -Wa,-mbig-obj raises it.

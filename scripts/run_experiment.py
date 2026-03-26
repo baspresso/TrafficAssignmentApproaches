@@ -6,8 +6,8 @@ Creates a self-contained run folder with CSV outputs and publication-ready plots
 Usage:
     python scripts/run_experiment.py tap --dataset SiouxFalls
     python scripts/run_experiment.py tap --dataset SiouxFalls --approach RouteBased --shift-method NewtonStep
-    python scripts/run_experiment.py cndp --config configs/cnd.siouxfalls.ini
-    python scripts/run_experiment.py cndp --config configs/cnd.siouxfalls.ini --scenario-name MyTest
+    python scripts/run_experiment.py cndp --config configs/cnd.siouxfalls.toml
+    python scripts/run_experiment.py cndp --config configs/cnd.siouxfalls.toml --scenario-name MyTest
 """
 
 import argparse
@@ -98,21 +98,17 @@ def resolve_exe(cli_override: Optional[str], default: Path) -> Path:
 
 
 def read_dataset_from_config(config_path: Path) -> Optional[str]:
-    """Read dataset name from [run] section of an INI config file."""
-    in_run = False
-    with open(config_path) as f:
-        for line in f:
-            stripped = line.strip()
-            if stripped.lower() == "[run]":
-                in_run = True
-                continue
-            if stripped.startswith("["):
-                in_run = False
-                continue
-            if in_run and stripped.startswith("dataset"):
-                _, _, value = stripped.partition("=")
-                return value.strip()
-    return None
+    """Read dataset name from a TOML config file ([network] dataset)."""
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        try:
+            import tomli as tomllib
+        except ModuleNotFoundError:
+            return None
+    with open(config_path, "rb") as f:
+        config = tomllib.load(f)
+    return config.get("network", {}).get("dataset")
 
 
 def create_run_dir(dataset: str, mode: str, label: Optional[str] = None) -> Path:
@@ -244,19 +240,22 @@ def write_readme(run_dir: Path, content: str):
 # ---------------------------------------------------------------------------
 
 def generate_tap_config(run_dir: Path, args) -> Path:
-    """Generate a temporary INI config from CLI args."""
-    lines = ["[run]"]
-    lines.append(f"dataset = {args.dataset}")
-    lines.append(f"approach = {args.approach}")
+    """Generate a temporary TOML config from CLI args."""
+    lines = ['[network]']
+    lines.append(f'dataset = "{args.dataset}"')
+    lines.append('')
+    lines.append('[solver]')
+    lines.append(f'approach = "{args.approach}"')
     if args.shift_method:
-        lines.append(f"shift_method = {args.shift_method}")
+        lines.append(f'[solver.route_based]')
+        lines.append(f'shift_method = "{args.shift_method}"')
     if args.approach_alpha is not None:
-        lines.append(f"approach_alpha = {args.approach_alpha}")
+        lines.append(f'approach_alpha = {args.approach_alpha}')
     if args.max_iterations is not None:
-        lines.append(f"max_standard_iterations = {args.max_iterations}")
-    lines.append("")
+        lines.append(f'max_standard_iterations = {args.max_iterations}')
+    lines.append('')
 
-    config_path = run_dir / "configs" / "generated_tap.ini"
+    config_path = run_dir / "configs" / "generated_tap.toml"
     config_path.write_text("\n".join(lines))
     return config_path
 
@@ -437,9 +436,13 @@ def post_process_cndp_outputs(run_dir: Path, scenario_name: str, config_path: Pa
     if summary_src.exists():
         shutil.copy2(str(summary_src), str(run_dir / "metadata" / "run_summary.csv"))
 
-    # Copy config
+    # Copy config (skip if already inside run_dir, e.g. generated scenario TOML)
     if config_path.exists():
-        shutil.copy2(str(config_path), str(run_dir / "configs" / f"{scenario_name}.ini"))
+        try:
+            config_path.resolve().relative_to(run_dir.resolve())
+        except ValueError:
+            ext = config_path.suffix or ".toml"
+            shutil.copy2(str(config_path), str(run_dir / "configs" / f"{scenario_name}{ext}"))
 
 
 def cleanup_cndp_root(run_dir: Path):
@@ -596,7 +599,7 @@ def main():
     tap_parser.add_argument("--dataset", default="SiouxFalls",
                             help="Dataset name (default: SiouxFalls)")
     tap_parser.add_argument("--config", default=None,
-                            help="INI config file (optional; CLI args used if omitted)")
+                            help="TOML config file (optional; CLI args used if omitted)")
     tap_parser.add_argument("--approach", default="Tapas",
                             help="RouteBased | Tapas (default: Tapas)")
     tap_parser.add_argument("--shift-method", default=None,
@@ -615,7 +618,7 @@ def main():
     # --- CNDP subcommand ---
     cndp_parser = subparsers.add_parser("cndp", help="Run CNDP optimization")
     cndp_parser.add_argument("--config", required=True,
-                             help="INI config file with [step.N] sections")
+                             help="TOML config file with [[pipeline]] entries")
     cndp_parser.add_argument("--dataset", default="SiouxFalls",
                              help="Dataset name (default: SiouxFalls)")
     cndp_parser.add_argument("--scenario-name", default=None,

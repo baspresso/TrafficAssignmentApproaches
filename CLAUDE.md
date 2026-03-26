@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build System
 
-C++20 project using CMake + Ninja + MinGW + vcpkg. Dependencies: Eigen3, Boost.Multiprecision, NLopt, OptimLib (FetchContent).
+C++20 project using CMake + Ninja + MinGW + vcpkg. Dependencies: Eigen3, Boost.Multiprecision, NLopt, toml++ (FetchContent), OptimLib (FetchContent).
 
 ```bash
 # Configure
@@ -14,7 +14,7 @@ cmake --preset mingw-vcpkg-release    # or mingw-vcpkg-debug / mingw-vcpkg-relwi
 cmake --build --preset build-release  # or build-debug / build-relwithdebinfo
 
 # Run
-./build/mingw-vcpkg-release/cndp_solver.exe --config configs/cnd.siouxfalls.ini
+./build/mingw-vcpkg-release/cndp_solver.exe --config configs/cnd.siouxfalls.toml
 ./build/mingw-vcpkg-release/cndp_solver.exe --help
 ```
 
@@ -29,7 +29,7 @@ cndp_solver.cpp                   — Config parsing, wiring, execution
     ↓
 cnd/BilevelCND                    — Upper-level optimization over link capacities
     ↓
-cnd/OptimizationPipeline          — Sequential [step.N] execution
+cnd/OptimizationPipeline          — Sequential [[pipeline]] execution
     ├── NloptOptimizationStep     — NLopt algorithms (COBYLA, BOBYQA, ISRES, ...)
     ├── OptimalityConditionStep   — Optimality condition-based iteration
     └── OptimlibOptimizationStep  — Population-based metaheuristics (DE, PSO, ...)
@@ -60,34 +60,54 @@ Two solver implementations, both implementing `TrafficAssignmentApproach<T>`:
 
 ## Configuration
 
-Layered config system with precedence: **defaults → INI file → environment variables → CLI args**.
+TOML-based layered config system with precedence: **defaults → TOML file → environment variables → CLI args**.
 
 ```bash
 ./build/mingw-vcpkg-release/cndp_solver.exe \
-  --config ./configs/cnd.siouxfalls.ini \
+  --config ./configs/cnd.siouxfalls.toml \
   --route-threads 2 \
   --max-standard-iters 150
 ```
 
 Environment variable prefix: `CND_` (e.g., `CND_ROUTE_THREADS=1`). CLI metrics args prefixed with `metrics_` (e.g., `--metrics_scenario_name`).
 
-### INI Sections
+### TOML Sections
 
-**`[run]`** — Algorithm selection: `dataset`, `approach` (RouteBased/Tapas), `shift_method` (RouteBased only), `approach_alpha`, `route_search_threads`, `tapas_mu`, `tapas_v`, `budget_function_multiplier`, `budget_upper_bound`, `constraints_file`.
+**`[network]`** — `dataset`, `constraints_file`.
+
+**`[solver]`** — Algorithm selection: `approach` (RouteBased/Tapas), `approach_alpha`, `max_standard_iterations`, `budget_function_multiplier`, `budget_upper_bound`, `link_capacity_selection_threshold`, `budget_threshold`.
+
+**`[solver.tapas]`** — Tapas-specific: `mu`, `v`, `pas_per_origin`, `pas_multiplier`, `rgap_check_interval`.
+
+**`[solver.route_based]`** — RouteBased-specific: `shift_method`, `route_search_threads`, `full_iteration_count`, `origin_iteration_count`, `ema_alpha`.
+
+**`[output]`** — `verbose`, `progress_format`, `print_effective_config`, `quiet`.
 
 **`[metrics]`** — Output control: `enable_trace`, `output_root`, `write_metadata_json`, `write_summary_csv`, `scenario_name`, `append_dataset_subdir`.
 
-**`[step.N]`** (N = 0, 1, 2, ...) — Pipeline steps executed sequentially:
-- `type = nlopt` — `algorithm` (LN_COBYLA, LN_BOBYQA, GN_ISRES, etc.), `max_iterations`, `tolerance`, optional `local_algorithm`
-- `type = optimality_condition` — `max_iterations`
-- `type = optimlib` — `algorithm` (DE, DE_PRMM, PSO, PSO_DV, NM, GD), `max_iterations`, `population_size` (0 = auto)
+**`[[pipeline]]`** — Array of optimization steps executed sequentially:
+- `type = "nlopt"` — `algorithm` (LN_COBYLA, LN_BOBYQA, GN_ISRES, etc.), `max_iterations`, `tolerance`, optional `local_algorithm`
+- `type = "optimality_condition"` — `max_iterations`
+- `type = "optimlib"` — `algorithm` (DE, DE_PRMM, PSO, PSO_DV, NM, GD), `max_iterations`, `population_size` (0 = auto)
 
-At least one `[step.N]` section is required; `cndp_solver.cpp` errors if none found.
+At least one `[[pipeline]]` entry is required; `cndp_solver.cpp` errors if none found.
+
+### Structured Config Types (C++)
+
+Config is loaded via `include/common/TomlConfigLoader.h` into structured types:
+- `Config::CndpConfig` — used by `cndp_solver.cpp` (has `NetworkConfig`, `SolverConfig`, `OutputConfig`, `CndMetricsConfig`, `vector<OptimizationStepConfig>`)
+- `Config::TapConfig` — used by `tap_solver.cpp` (subset: `NetworkConfig`, `SolverConfig`, `OutputConfig`)
+
+### Comparison Manifests
+
+Comparison manifests in `configs/comparisons/*.toml` use inline scenarios with a `[defaults]` + `[[scenarios]]` pattern. Each scenario defines its `[[scenarios.pipeline]]` and optional per-scenario overrides. The runner (`run_cndp_comparison.py`) deep-merges defaults with scenario overrides and generates per-scenario TOML files at runtime.
 
 ## Key File Locations
 
 - `src/cndp_solver.cpp` — CNDP entry point; all config/wiring logic
 - `src/tap_solver.cpp` — Standalone TAP solver entry point
+- `include/common/TomlConfigLoader.h` — TOML config loader + structured config types + env/CLI overrides
+- `include/common/ConfigUtils.h` — CLI parsing, path resolution, string utilities
 - `include/cnd/BilevelCND.h` — Bilevel optimization core
 - `include/cnd/CndOptimizationContext.h` — Shared context, objective evaluation, crash recovery
 - `include/cnd/OptimizationPipeline.h` — Sequential step execution
@@ -95,14 +115,13 @@ At least one `[step.N]` section is required; `cndp_solver.cpp` errors if none fo
 - `include/tap/algorithms/common/TrafficAssignmentApproach.h` — Base TAP interface
 - `include/tap/core/Network.h` — Network data structure + Dijkstra
 - `include/tap/data/Link.h` — BPR function implementation
-- `include/common/ConfigUtils.h` — Config parsing utilities
-- `configs/cnd.siouxfalls.ini` — Reference CNDP config
-- `configs/scenarios/` — Auto-generated scenario configs for comparison runs
+- `configs/cnd.siouxfalls.toml` — Reference CNDP config
+- `configs/comparisons/` — Comparison manifests with inline scenarios
 
 ## Scripts
 
 - `scripts/run_experiment.py` — Unified experiment runner for TAP and CNDP. Creates self-contained run folders with CSV outputs and publication-ready plots. Subcommands: `tap` (standalone TAP), `cndp` (single CNDP scenario).
-- `scripts/run_cndp_comparison.py` — Batch runner: generates per-scenario INI configs, launches experiments, organizes outputs into self-contained run folders under `performance_results/{Dataset}/runs/`.
+- `scripts/run_cndp_comparison.py` — Batch runner: reads TOML comparison manifests with inline scenarios, generates per-scenario TOML configs at runtime, launches experiments, organizes outputs into self-contained run folders under `performance_results/{Dataset}/runs/`.
 - `scripts/plot_cndp_comparison.py` — Publication-ready analysis: objective vs time plots, convergence, sensitivity, summary tables (CSV + LaTeX). Supports `--run-dir` mode and multi-run averaging.
 
 ## Data Format (TNTP)
@@ -114,4 +133,4 @@ Network files (`*_net.csv`): `init_node, term_node, capacity, length, free_flow_
 - **Headers-only design:** Most implementation is in `.h` files under `include/`.
 - **Templates on numeric type:** `template<typename T>` parameterized (typically `double`, `long double`, or Boost high-precision).
 - **Factory pattern:** Used for algorithm selection — `RouteBasedShiftMethodFactory`, `OptimizationStepFactory`.
-- **Pipeline-based optimization:** All CNDP configs must use `[step.N]` sections; the legacy single-algorithm constructor was removed.
+- **Pipeline-based optimization:** All CNDP configs must use `[[pipeline]]` entries; the legacy single-algorithm constructor was removed.
