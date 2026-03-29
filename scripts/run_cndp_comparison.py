@@ -381,7 +381,7 @@ def write_run_readme(run_dir: Path, dataset: str, comparison_config: dict,
     for r in results:
         status = "OK" if r["exit_code"] == 0 else "FAILED"
         obj = f"{r['final_objective']:.4f}" if r["final_objective"] is not None else "N/A"
-        budget = f"{r['final_budget']:.2f}" if r["final_budget"] is not None else "N/A"
+        budget = f"{r['final_budget']:.4f}" if r["final_budget"] is not None else "N/A"
         lines.append(f"| {r['scenario']} | {status} | {r['elapsed_seconds']:.1f} | {obj} | {budget} |")
 
     lines += [
@@ -544,7 +544,7 @@ def main():
     for r in results:
         status = "OK" if r["exit_code"] == 0 else "FAILED"
         obj_str = f"{r['final_objective']:.6f}" if r["final_objective"] is not None else "N/A"
-        budget_str = f"{r['final_budget']:.2f}" if r["final_budget"] is not None else "N/A"
+        budget_str = f"{r['final_budget']:.4f}" if r["final_budget"] is not None else "N/A"
         print(f"{r['scenario']:<30} {status:<10} {r['elapsed_seconds']:<10.1f} {obj_str:<20} {budget_str:<15}")
 
     print(f"\nTotal wall time: {total_wall:.1f}s")

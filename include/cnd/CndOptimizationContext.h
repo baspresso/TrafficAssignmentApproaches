@@ -436,8 +436,8 @@ public:
                 << " rate=" << std::fixed << std::setprecision(2) << rate
                 << " unit=" << unit
                 << " objective=" << std::defaultfloat << std::setprecision(10) << objective_function
-                << " ttt=" << total_travel_time
-                << " budget=" << budget_function << "\n" << std::flush;
+                << " ttt=" << std::defaultfloat << std::setprecision(10) << total_travel_time
+                << " budget=" << std::defaultfloat << std::setprecision(10) << budget_function << "\n" << std::flush;
       return;
     }
 
@@ -472,10 +472,9 @@ public:
          << current << "/" << total
          << " left:" << left
          << " [" << std::fixed << std::setprecision(2) << rate << rate_unit << "] "
-         << std::defaultfloat << std::setprecision(10)
-         << "objective_function=" << objective_function
-         << " total_travel_time=" << total_travel_time
-         << " budget_function=" << budget_function;
+         << "obj=" << std::fixed << std::setprecision(2) << objective_function
+         << " ttt=" << std::fixed << std::setprecision(2) << total_travel_time
+         << " bgt=" << std::fixed << std::setprecision(2) << budget_function;
     std::cout << line.str() << std::flush;
   }
 

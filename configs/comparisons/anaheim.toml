@@ -1,16 +1,16 @@
 [comparison]
-description = "SiouxFalls CNDP Algorithm Comparison"
+description = "Anaheim CNDP Algorithm Comparison"
 time_limit = 1800
 etalon_time_limit = 7200
 
 [defaults.network]
-dataset = "SiouxFalls"
+dataset = "Anaheim"
 
 [defaults.solver]
 approach = "Tapas"
 approach_alpha = 1e-14
-budget_function_multiplier = 5.0
-budget_upper_bound = 100_000.0
+budget_function_multiplier = 10.0
+budget_upper_bound = 14_000.0
 
 [defaults.metrics]
 enable_trace = true
@@ -34,22 +34,22 @@ tolerance = 1e-4
 
 [[scenarios]]
 name = "COBYLA"
-description = "COBYLA 500 iterations"
+description = "COBYLA 900 iterations"
 color = "#1f77b4"
 [[scenarios.pipeline]]
 type = "nlopt"
 algorithm = "LN_COBYLA"
-max_iterations = 500
+max_iterations = 950
 tolerance = 1e-4
 
 [[scenarios]]
 name = "BOBYQA"
-description = "BOBYQA 800 iterations"
+description = "BOBYQA 2000 iterations"
 color = "#17becf"
 [[scenarios.pipeline]]
 type = "nlopt"
 algorithm = "LN_BOBYQA"
-max_iterations = 500
+max_iterations = 2000
 tolerance = 1e-4
 
 [[scenarios]]
@@ -58,4 +58,4 @@ description = "Optimality condition 35 iterations"
 color = "#d62728"
 [[scenarios.pipeline]]
 type = "optimality_condition"
-max_iterations = 60
+max_iterations = 40

@@ -35,6 +35,7 @@ except ModuleNotFoundError:
 
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 import numpy as np
 import pandas as pd
 
@@ -308,8 +309,8 @@ def plot_objective_vs_time(traces: dict[str, pd.DataFrame], dataset: str, fig_di
 
     fig.savefig(fig_dir / f"objective_vs_time_{dataset}.png")
     fig.savefig(fig_dir / f"objective_vs_time_{dataset}.pdf")
-    plt.close(fig)
     print(f"  Saved: objective_vs_time_{dataset}")
+    return fig
 
 
 def plot_best_so_far(traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Path):
@@ -343,8 +344,8 @@ def plot_best_so_far(traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Pat
 
     fig.savefig(fig_dir / f"best_so_far_{dataset}.png")
     fig.savefig(fig_dir / f"best_so_far_{dataset}.pdf")
-    plt.close(fig)
     print(f"  Saved: best_so_far_{dataset}")
+    return fig
 
 
 def plot_optimality_gap_vs_evaluations(
@@ -357,7 +358,7 @@ def plot_optimality_gap_vs_evaluations(
     etalon_obj = get_etalon_best_objective(traces)
     if etalon_obj is None or not np.isfinite(etalon_obj) or etalon_obj <= 0:
         print("  Skipping optimality gap plot (no etalon reference)")
-        return
+        return None
 
     plot_traces = exclude_etalon(traces)
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -391,8 +392,8 @@ def plot_optimality_gap_vs_evaluations(
 
     fig.savefig(fig_dir / f"gap_vs_evaluations_{dataset}.png")
     fig.savefig(fig_dir / f"gap_vs_evaluations_{dataset}.pdf")
-    plt.close(fig)
     print(f"  Saved: gap_vs_evaluations_{dataset}")
+    return fig
 
 
 def plot_absolute_gap_vs_time(
@@ -402,7 +403,7 @@ def plot_absolute_gap_vs_time(
     etalon_obj = get_etalon_best_objective(traces)
     if etalon_obj is None or not np.isfinite(etalon_obj) or etalon_obj <= 0:
         print("  Skipping objective gap vs time plot (no etalon reference)")
-        return
+        return None
 
     plot_traces = exclude_etalon(traces)
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -434,8 +435,8 @@ def plot_absolute_gap_vs_time(
 
     fig.savefig(fig_dir / f"absolute_gap_vs_time_{dataset}.png")
     fig.savefig(fig_dir / f"absolute_gap_vs_time_{dataset}.pdf")
-    plt.close(fig)
     print(f"  Saved: absolute_gap_vs_time_{dataset}")
+    return fig
 
 
 def plot_absolute_gap_vs_evaluations(
@@ -445,7 +446,7 @@ def plot_absolute_gap_vs_evaluations(
     etalon_obj = get_etalon_best_objective(traces)
     if etalon_obj is None or not np.isfinite(etalon_obj) or etalon_obj <= 0:
         print("  Skipping objective gap vs evaluations plot (no etalon reference)")
-        return
+        return None
 
     plot_traces = exclude_etalon(traces)
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -478,8 +479,8 @@ def plot_absolute_gap_vs_evaluations(
 
     fig.savefig(fig_dir / f"absolute_gap_vs_evaluations_{dataset}.png")
     fig.savefig(fig_dir / f"absolute_gap_vs_evaluations_{dataset}.pdf")
-    plt.close(fig)
     print(f"  Saved: absolute_gap_vs_evaluations_{dataset}")
+    return fig
 
 
 def plot_budget_utilization(
@@ -541,8 +542,8 @@ def plot_budget_utilization(
 
     fig.savefig(fig_dir / f"budget_vs_time_{dataset}.png")
     fig.savefig(fig_dir / f"budget_vs_time_{dataset}.pdf")
-    plt.close(fig)
     print(f"  Saved: budget_vs_time_{dataset}")
+    return fig
 
 
 def plot_convergence_character(traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Path):
@@ -556,7 +557,7 @@ def plot_convergence_character(traces: dict[str, pd.DataFrame], dataset: str, fi
 
     if optcond_df is None and cobyla_df is None:
         print("  Skipping convergence character plot (need OptCond-only or COBYLA-only)")
-        return
+        return None
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
@@ -595,8 +596,8 @@ def plot_convergence_character(traces: dict[str, pd.DataFrame], dataset: str, fi
 
     fig.savefig(fig_dir / f"convergence_character_{dataset}.png")
     fig.savefig(fig_dir / f"convergence_character_{dataset}.pdf")
-    plt.close(fig)
     print(f"  Saved: convergence_character_{dataset}")
+    return fig
 
 
 def plot_sensitivity_sweeps(traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Path):
@@ -625,7 +626,7 @@ def plot_sensitivity_sweeps(traces: dict[str, pd.DataFrame], dataset: str, fig_d
             hybrid_sweep[frac] = (name, df)
 
     if not optcond_sweep and not cobyla_sweep and not hybrid_sweep:
-        return  # No sweep data
+        return None  # No sweep data
 
     n_panels = sum(1 for s in [optcond_sweep, cobyla_sweep, hybrid_sweep] if s)
     fig, axes = plt.subplots(1, n_panels, figsize=(6 * n_panels, 5))
@@ -697,15 +698,15 @@ def plot_sensitivity_sweeps(traces: dict[str, pd.DataFrame], dataset: str, fig_d
 
     fig.savefig(fig_dir / f"sensitivity_sweeps_{dataset}.png")
     fig.savefig(fig_dir / f"sensitivity_sweeps_{dataset}.pdf")
-    plt.close(fig)
     print(f"  Saved: sensitivity_sweeps_{dataset}")
+    return fig
 
 
 def plot_multi_run(traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Path):
     """Plot multi-run scenarios with mean line and +/-1 sigma shaded band."""
     groups = detect_multi_run_groups(traces)
     if not groups:
-        return
+        return None
 
     etalon_obj = get_etalon_best_objective(traces)
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -741,8 +742,8 @@ def plot_multi_run(traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Path)
 
     fig.savefig(fig_dir / f"multi_run_{dataset}.png")
     fig.savefig(fig_dir / f"multi_run_{dataset}.pdf")
-    plt.close(fig)
     print(f"  Saved: multi_run_{dataset}")
+    return fig
 
 
 def plot_ta_compute_time(traces: dict[str, pd.DataFrame], dataset: str, fig_dir: Path):
@@ -761,7 +762,7 @@ def plot_ta_compute_time(traces: dict[str, pd.DataFrame], dataset: str, fig_dir:
 
     if not data:
         print("  Skipping TA compute time plot (no data)")
-        return
+        return None
 
     fig, ax = plt.subplots(figsize=(10, 6))
     bp = ax.boxplot(data, labels=labels, patch_artist=True, vert=True)
@@ -777,19 +778,19 @@ def plot_ta_compute_time(traces: dict[str, pd.DataFrame], dataset: str, fig_dir:
 
     fig.savefig(fig_dir / "ta_compute_time.png")
     fig.savefig(fig_dir / "ta_compute_time.pdf")
-    plt.close(fig)
     print(f"  Saved: ta_compute_time")
+    return fig
 
 
 def plot_capacity_heatmap(dataset: str, fig_dir: Path, solutions_dir: Path):
     """Heatmap: links (Y) x scenarios (X), color = capacity delta from lower bound."""
     if not solutions_dir.exists():
-        return
+        return None
 
     solution_files = sorted(solutions_dir.glob("*_solution.csv"))
     if not solution_files:
         print("  Skipping capacity heatmap (no solution files)")
-        return
+        return None
 
     scenario_names = []
     deltas = []
@@ -806,7 +807,7 @@ def plot_capacity_heatmap(dataset: str, fig_dir: Path, solutions_dir: Path):
 
     if len(scenario_names) < 2:
         print("  Skipping capacity heatmap (need >= 2 solutions)")
-        return
+        return None
 
     # Build matrix: rows=links, cols=scenarios
     matrix = np.array(deltas).T  # shape: (n_links, n_scenarios)
@@ -816,7 +817,7 @@ def plot_capacity_heatmap(dataset: str, fig_dir: Path, solutions_dir: Path):
     threshold = max_per_link.max() * 0.01
     active_mask = max_per_link > threshold
     if not active_mask.any():
-        return
+        return None
 
     matrix_filtered = matrix[active_mask]
     link_indices = np.where(active_mask)[0]
@@ -834,8 +835,8 @@ def plot_capacity_heatmap(dataset: str, fig_dir: Path, solutions_dir: Path):
 
     fig.savefig(fig_dir / "capacity_heatmap.png")
     fig.savefig(fig_dir / "capacity_heatmap.pdf")
-    plt.close(fig)
     print(f"  Saved: capacity_heatmap")
+    return fig
 
 
 def generate_capacity_comparison(tables_dir: Path, solutions_dir: Path):
@@ -1173,6 +1174,161 @@ def generate_summary_table(
     return summary_df
 
 
+def parse_network_properties(dataset: str, run_dir: Path | None = None,
+                             metadata_dir: Path | None = None) -> dict:
+    """Parse network properties from net CSV header and optional metadata JSON."""
+    props: dict = {"dataset": dataset}
+
+    # Try to read header from network file
+    net_path = PROJECT_ROOT / "data" / "TransportationNetworks" / dataset / f"{dataset}_net.csv"
+    if net_path.exists():
+        with open(net_path) as f:
+            header = f.readline().strip()
+        if header.startswith("#"):
+            for part in header.lstrip("# ").split(","):
+                part = part.strip()
+                if ":" in part:
+                    key, val = part.split(":", 1)
+                    key = key.strip().lower().replace(" ", "_")
+                    try:
+                        props[key] = int(val.strip())
+                    except ValueError:
+                        props[key] = val.strip()
+
+    # Enrich from metadata JSON
+    search_dirs = []
+    if metadata_dir is not None:
+        search_dirs.append(metadata_dir)
+    if run_dir is not None:
+        search_dirs.append(run_dir / "metadata")
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for meta_path in search_dir.glob("*_metadata.json"):
+            with open(meta_path) as f:
+                meta = json.load(f)
+            for key in ("number_of_od_pairs", "design_variables", "budget_upper_bound",
+                        "budget_function_multiplier", "budget_threshold",
+                        "link_capacity_selection_threshold"):
+                if key in meta and key not in props:
+                    props[key] = meta[key]
+            break  # Only need one metadata file
+
+    return props
+
+
+def _create_title_page(
+    dataset: str,
+    traces: dict[str, pd.DataFrame],
+    run_dir: Path | None = None,
+    metadata_dir: Path | None = None,
+) -> plt.Figure:
+    """Create a title page figure for the PDF report."""
+    props = parse_network_properties(dataset, run_dir=run_dir, metadata_dir=metadata_dir)
+
+    fig = plt.figure(figsize=(8.5, 11))  # US Letter
+    fig.subplots_adjust(left=0.1, right=0.9, top=0.92, bottom=0.05)
+
+    # Title
+    fig.text(0.5, 0.90, "CNDP Comparison Report", ha="center", va="top",
+             fontsize=20, fontweight="bold")
+    fig.text(0.5, 0.86, dataset, ha="center", va="top",
+             fontsize=16, color="#555555")
+
+    # Network properties table
+    y = 0.80
+    fig.text(0.1, y, "Network Properties", fontsize=13, fontweight="bold")
+    y -= 0.03
+
+    prop_labels = [
+        ("number_of_zones", "Zones"),
+        ("number_of_nodes", "Nodes"),
+        ("number_of_links", "Links"),
+        ("number_of_od_pairs", "OD Pairs"),
+        ("design_variables", "Design Variables"),
+        ("budget_upper_bound", "Budget Upper Bound"),
+        ("budget_function_multiplier", "Budget Multiplier"),
+        ("budget_threshold", "Budget Threshold"),
+        ("link_capacity_selection_threshold", "Link Selection Threshold"),
+    ]
+    for key, label in prop_labels:
+        if key in props:
+            val = props[key]
+            if isinstance(val, float):
+                val_str = f"{val:,.4f}"
+            elif isinstance(val, int):
+                val_str = f"{val:,}"
+            else:
+                val_str = str(val)
+            fig.text(0.12, y, f"{label}:", fontsize=10, fontweight="bold")
+            fig.text(0.45, y, val_str, fontsize=10)
+            y -= 0.025
+
+    # Scenario summary
+    y -= 0.02
+    fig.text(0.1, y, "Scenarios", fontsize=13, fontweight="bold")
+    y -= 0.03
+
+    non_etalon = exclude_etalon(traces)
+    for scenario_name, df in sorted(non_etalon.items()):
+        n_evals = len(df)
+        elapsed = df["ElapsedTime(s)"].max() if not df.empty else 0.0
+        feasible = filter_budget_feasible(df)
+        if not feasible.empty:
+            best_obj = compute_best_so_far(feasible["Objective"]).iloc[-1]
+            obj_str = f"best={best_obj:,.4f}"
+        else:
+            obj_str = "no feasible"
+        fig.text(0.12, y, f"{scenario_name}", fontsize=9, fontweight="bold")
+        fig.text(0.45, y, f"{n_evals} evals, {elapsed:.1f}s, {obj_str}", fontsize=9)
+        y -= 0.022
+        if y < 0.08:
+            fig.text(0.12, y, "... (more scenarios)", fontsize=9, fontstyle="italic")
+            break
+
+    # Footer: timestamp and git commit from manifest
+    footer_parts = []
+    if run_dir is not None:
+        manifest_path = run_dir / "run_manifest.json"
+        if manifest_path.exists():
+            with open(manifest_path) as f:
+                manifest = json.load(f)
+            if "timestamp" in manifest:
+                footer_parts.append(f"Run: {manifest['timestamp']}")
+            if "git_commit" in manifest:
+                footer_parts.append(f"Git: {manifest['git_commit'][:8]}")
+    if footer_parts:
+        fig.text(0.5, 0.02, "  |  ".join(footer_parts),
+                 ha="center", fontsize=8, color="#888888")
+
+    return fig
+
+
+def generate_pdf_report(
+    dataset: str,
+    traces: dict[str, pd.DataFrame],
+    fig_dir: Path,
+    figures: list,
+    run_dir: Path | None = None,
+    metadata_dir: Path | None = None,
+):
+    """Generate a multi-page PDF report with title page and all plots."""
+    pdf_path = fig_dir / f"report_{dataset}.pdf"
+    with PdfPages(str(pdf_path)) as pdf:
+        # Title page
+        title_fig = _create_title_page(dataset, traces, run_dir=run_dir,
+                                       metadata_dir=metadata_dir)
+        pdf.savefig(title_fig)
+        plt.close(title_fig)
+
+        # All plot figures
+        for fig in figures:
+            if fig is not None:
+                pdf.savefig(fig)
+
+    print(f"  Saved PDF report: {pdf_path.name}")
+
+
 def generate_single_dataset_plots(
     dataset: str, traces: dict[str, pd.DataFrame],
     run_dir: Path | None = None,
@@ -1203,20 +1359,28 @@ def generate_single_dataset_plots(
     print(f"\nPlotting {len(non_etalon)} scenarios for {dataset}{etalon_tag}")
 
     print("\nGenerating plots...")
-    plot_objective_vs_time(traces, dataset, fig_dir)
-    plot_best_so_far(traces, dataset, fig_dir)
-    plot_optimality_gap_vs_evaluations(traces, dataset, fig_dir)
-    plot_absolute_gap_vs_time(traces, dataset, fig_dir)
-    plot_absolute_gap_vs_evaluations(traces, dataset, fig_dir)
-    plot_budget_utilization(traces, dataset, fig_dir, metadata_dir=metadata_dir)
-    plot_convergence_character(traces, dataset, fig_dir)
-    plot_ta_compute_time(traces, dataset, fig_dir)
-    plot_sensitivity_sweeps(traces, dataset, fig_dir)
-    plot_multi_run(traces, dataset, fig_dir)
+    figures = []
+    figures.append(plot_objective_vs_time(traces, dataset, fig_dir))
+    figures.append(plot_best_so_far(traces, dataset, fig_dir))
+    figures.append(plot_optimality_gap_vs_evaluations(traces, dataset, fig_dir))
+    figures.append(plot_absolute_gap_vs_time(traces, dataset, fig_dir))
+    figures.append(plot_absolute_gap_vs_evaluations(traces, dataset, fig_dir))
+    figures.append(plot_budget_utilization(traces, dataset, fig_dir, metadata_dir=metadata_dir))
+    figures.append(plot_convergence_character(traces, dataset, fig_dir))
+    figures.append(plot_ta_compute_time(traces, dataset, fig_dir))
+    figures.append(plot_sensitivity_sweeps(traces, dataset, fig_dir))
+    figures.append(plot_multi_run(traces, dataset, fig_dir))
 
     if solutions_dir is not None and solutions_dir.exists():
-        plot_capacity_heatmap(dataset, fig_dir, solutions_dir)
+        figures.append(plot_capacity_heatmap(dataset, fig_dir, solutions_dir))
         generate_capacity_comparison(tables_dir, solutions_dir)
+
+    generate_pdf_report(dataset, traces, fig_dir, figures,
+                        run_dir=run_dir, metadata_dir=metadata_dir)
+
+    for fig in figures:
+        if fig is not None:
+            plt.close(fig)
 
     etalon_obj = get_etalon_best_objective(traces)
     generate_summary_table(traces, dataset, tables_dir)

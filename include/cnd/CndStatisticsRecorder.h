@@ -378,6 +378,7 @@ private:
 
   void WriteMetadataFile() const {
     std::ofstream file(metadata_file_path_, std::ios::out);
+    file << std::setprecision(15);
     const std::string approach_name =
       metadata_.approach_name.empty() ? "UnknownApproach" : metadata_.approach_name;
     file << "{\n";

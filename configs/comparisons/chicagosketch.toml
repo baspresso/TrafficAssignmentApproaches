@@ -1,16 +1,16 @@
 [comparison]
-description = "SiouxFalls CNDP Algorithm Comparison"
+description = "ChicagoSketch CNDP Algorithm Comparison"
 time_limit = 1800
 etalon_time_limit = 7200
 
 [defaults.network]
-dataset = "SiouxFalls"
+dataset = "ChicagoSketch"
 
 [defaults.solver]
 approach = "Tapas"
 approach_alpha = 1e-14
-budget_function_multiplier = 5.0
-budget_upper_bound = 100_000.0
+budget_function_multiplier = 1.0
+budget_upper_bound = 50_000.0
 
 [defaults.metrics]
 enable_trace = true
@@ -22,40 +22,38 @@ flush_every_n_points = 10
 
 [[scenarios]]
 name = "Etalon"
-description = "Reference solution (COBYLA 1000)"
+description = "Reference solution (OptCond60)"
 etalon = true
+[[scenarios.pipeline]]
+type = "optimality_condition"
+max_iterations = 60
+
+# --- Single-algorithm scenarios ---
+
+[[scenarios]]
+name = "COBYLA"
+description = "COBYLA 1000 iterations"
+color = "#1f77b4"
 [[scenarios.pipeline]]
 type = "nlopt"
 algorithm = "LN_COBYLA"
 max_iterations = 1000
 tolerance = 1e-4
 
-# --- Single-algorithm scenarios ---
-
-[[scenarios]]
-name = "COBYLA"
-description = "COBYLA 500 iterations"
-color = "#1f77b4"
-[[scenarios.pipeline]]
-type = "nlopt"
-algorithm = "LN_COBYLA"
-max_iterations = 500
-tolerance = 1e-4
-
 [[scenarios]]
 name = "BOBYQA"
-description = "BOBYQA 800 iterations"
+description = "BOBYQA 1000 iterations"
 color = "#17becf"
 [[scenarios.pipeline]]
 type = "nlopt"
 algorithm = "LN_BOBYQA"
-max_iterations = 500
+max_iterations = 1000
 tolerance = 1e-4
 
 [[scenarios]]
 name = "OptCond"
-description = "Optimality condition 35 iterations"
+description = "Optimality condition 50 iterations"
 color = "#d62728"
 [[scenarios.pipeline]]
 type = "optimality_condition"
-max_iterations = 60
+max_iterations = 50

@@ -284,18 +284,18 @@ private:
     // Always emit structured [RESULT] line for machine parsing
     std::cout << "[RESULT]"
               << " optimization_time=" << std::fixed << std::setprecision(2) << optimization_elapsed_seconds
-              << " objective_function=" << std::setprecision(10) << objective_function
-              << " total_travel_time=" << total_travel_time
-              << " budget_function=" << budget_function
+              << " objective_function=" << std::fixed << std::setprecision(10) << objective_function
+              << " total_travel_time=" << std::fixed << std::setprecision(10) << total_travel_time
+              << " budget_function=" << std::fixed << std::setprecision(10) << budget_function
               << std::endl;
 
     if (verbose_) {
       std::cout << "optimization_time = "
                 << std::fixed << std::setprecision(2)
-                << optimization_elapsed_seconds << "s " << std::setprecision(10)
-                << "objective_function=" << objective_function
-                << " total_travel_time=" << total_travel_time
-                << " budget_function=" << budget_function << std::endl;
+                << optimization_elapsed_seconds << "s "
+                << "objective_function=" << std::fixed << std::setprecision(10) << objective_function
+                << " total_travel_time=" << std::fixed << std::setprecision(10) << total_travel_time
+                << " budget_function=" << std::fixed << std::setprecision(10) << budget_function << std::endl;
     }
 
     StopStatisticsRecording(
