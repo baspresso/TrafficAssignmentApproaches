@@ -13,8 +13,17 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(FetchContent)
 
 find_package(Eigen3 REQUIRED)
-find_package(Boost CONFIG REQUIRED COMPONENTS multiprecision)
+# Boost.Multiprecision is header-only; the Debian Boost package ships only the
+# master BoostConfig.cmake (no per-component configs), so request headers only.
+find_package(Boost CONFIG REQUIRED)
 find_package(NLopt CONFIG REQUIRED)
+# Debian's libnlopt-cxx-dev exports NLopt::nlopt_cxx; libnlopt-dev exports
+# NLopt::nlopt. Alias to a single name so the target_link_libraries calls
+# below don't have to care which one find_package picked up.
+if(TARGET NLopt::nlopt_cxx AND NOT TARGET NLopt::nlopt)
+    add_library(NLopt::nlopt INTERFACE IMPORTED)
+    target_link_libraries(NLopt::nlopt INTERFACE NLopt::nlopt_cxx)
+endif()
 
 # --- toml++ (header-only TOML parser) ---
 FetchContent_Declare(
@@ -59,7 +68,7 @@ add_executable(cndp_solver src/cndp_solver.cpp)
 
 target_link_libraries(cndp_solver PRIVATE
     Eigen3::Eigen
-    Boost::multiprecision
+    Boost::headers
     NLopt::nlopt
     optimlib
     tomlplusplus::tomlplusplus
@@ -69,29 +78,6 @@ add_executable(tap_solver src/tap_solver.cpp)
 
 target_link_libraries(tap_solver PRIVATE
     Eigen3::Eigen
-    Boost::multiprecision
+    Boost::headers
     tomlplusplus::tomlplusplus
 )
-
-# MinGW debug builds hit the COFF section limit on large TUs; -Wa,-mbig-obj raises it.
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(cndp_solver PRIVATE $<$<CONFIG:Debug>:-Wa,-mbig-obj>)
-    target_compile_options(tap_solver PRIVATE $<$<CONFIG:Debug>:-Wa,-mbig-obj>)
-endif()
-
-if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    get_filename_component(MINGW_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    foreach(MINGW_RUNTIME_DLL libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
-        if(EXISTS "${MINGW_BIN_DIR}/${MINGW_RUNTIME_DLL}")
-            foreach(TARGET_EXE cndp_solver tap_solver)
-                add_custom_command(
-                    TARGET ${TARGET_EXE}
-                    POST_BUILD
-                    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                            "${MINGW_BIN_DIR}/${MINGW_RUNTIME_DLL}"
-                            "$<TARGET_FILE_DIR:${TARGET_EXE}>"
-                )
-            endforeach()
-        endif()
-    endforeach()
-endif()

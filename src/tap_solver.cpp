@@ -7,12 +7,7 @@
 #include <stdexcept>
 #include <string>
 
-#ifdef _WIN32
-  #include <io.h>
-  #include <cstdio>
-#else
-  #include <unistd.h>
-#endif
+#include <unistd.h>
 
 #include "../include/common/TomlConfigLoader.h"
 #include "../include/tap/algorithms/route_based/RouteBasedApproach.h"
@@ -58,7 +53,7 @@ CreateApproach(const TapConfig& config, TrafficAssignment::Network<long double>&
 
 void PrintHelp() {
   std::cout
-    << "Usage: tap_solver.exe [options]\n\n"
+    << "Usage: tap_solver [options]\n\n"
     << "Standalone Traffic Assignment solver.\n"
     << "All options have defaults, so no arguments are required.\n\n"
     << "Layering: defaults -> TOML config file -> environment -> CLI\n\n"
@@ -87,9 +82,9 @@ void PrintHelp() {
     << "  CND_TAPAS_MU, CND_TAPAS_V,\n"
     << "  CND_OUTPUT_ROOT, CND_PRINT_CONFIG\n\n"
     << "Examples:\n"
-    << "  tap_solver.exe --dataset SiouxFalls --approach Tapas\n"
-    << "  tap_solver.exe --config configs/tap.siouxfalls.toml\n"
-    << "  tap_solver.exe --dataset Anaheim --approach RouteBased --shift-method NewtonStep\n"
+    << "  tap_solver --dataset SiouxFalls --approach Tapas\n"
+    << "  tap_solver --config configs/tap.siouxfalls.toml\n"
+    << "  tap_solver --dataset Anaheim --approach RouteBased --shift-method NewtonStep\n"
     << "\nSupported approaches: RouteBased, Tapas\n";
 }
 
@@ -161,11 +156,7 @@ int main(int argc, char** argv) {
     } else if (config.output.quiet == "false") {
       quiet = false;
     } else {
-      #ifdef _WIN32
-        quiet = !_isatty(_fileno(stdout));
-      #else
-        quiet = !isatty(STDOUT_FILENO);
-      #endif
+      quiet = !isatty(STDOUT_FILENO);
     }
 
     if (config.output.print_effective_config && !quiet) {

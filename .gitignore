@@ -2,25 +2,20 @@
 build/
 out/
 
-# Executables
-*.exe
-
 # Object files
 *.o
-*.obj
 
 # CMake files
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 
-# Visual Studio Code settings
+# Editor / IDE
 .vscode/
-
-.vs
-
-out
-
+.vs/
 CMakeSettings.json
 
+# Claude Code
 .claude
+
+.venv

@@ -2,33 +2,32 @@
   "version": 4,
   "configurePresets": [
     {
-      "name": "mingw-vcpkg-base",
+      "name": "linux-base",
       "hidden": true,
       "generator": "Ninja",
       "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },
     {
-      "name": "mingw-vcpkg-debug",
-      "inherits": "mingw-vcpkg-base",
+      "name": "linux-debug",
+      "inherits": "linux-base",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
     },
     {
-      "name": "mingw-vcpkg-release",
-      "inherits": "mingw-vcpkg-base",
+      "name": "linux-release",
+      "inherits": "linux-base",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
     },
     {
-      "name": "mingw-vcpkg-relwithdebinfo",
-      "inherits": "mingw-vcpkg-base",
+      "name": "linux-relwithdebinfo",
+      "inherits": "linux-base",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo"
@@ -38,15 +37,15 @@
   "buildPresets": [
     {
       "name": "build-debug",
-      "configurePreset": "mingw-vcpkg-debug"
+      "configurePreset": "linux-debug"
     },
     {
       "name": "build-release",
-      "configurePreset": "mingw-vcpkg-release"
+      "configurePreset": "linux-release"
     },
     {
       "name": "build-relwithdebinfo",
-      "configurePreset": "mingw-vcpkg-relwithdebinfo"
+      "configurePreset": "linux-relwithdebinfo"
     }
   ]
 }

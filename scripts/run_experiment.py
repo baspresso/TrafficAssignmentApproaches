@@ -69,8 +69,8 @@ class _SimpleProgressBar:
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CNDP_EXE = PROJECT_ROOT / "build" / "mingw-vcpkg-release" / "cndp_solver.exe"
-DEFAULT_TAP_EXE = PROJECT_ROOT / "build" / "mingw-vcpkg-release" / "tap_solver.exe"
+DEFAULT_CNDP_EXE = PROJECT_ROOT / "build" / "linux-release" / "cndp_solver"
+DEFAULT_TAP_EXE = PROJECT_ROOT / "build" / "linux-release" / "tap_solver"
 
 
 # ---------------------------------------------------------------------------
@@ -609,7 +609,7 @@ def main():
     tap_parser.add_argument("--max-iterations", type=int, default=None,
                             help="TAP iteration limit")
     tap_parser.add_argument("--exe", default=None,
-                            help="Path to tap_solver.exe")
+                            help="Path to tap_solver binary")
     tap_parser.add_argument("--time-limit", type=int, default=None,
                             help="Time limit in seconds")
     tap_parser.add_argument("--label", default=None,
@@ -624,7 +624,7 @@ def main():
     cndp_parser.add_argument("--scenario-name", default=None,
                              help="Scenario label (default: derived from config filename)")
     cndp_parser.add_argument("--exe", default=None,
-                             help="Path to cndp_solver.exe")
+                             help="Path to cndp_solver binary")
     cndp_parser.add_argument("--time-limit", type=int, default=None,
                              help="Time limit in seconds")
     cndp_parser.add_argument("--label", default=None,

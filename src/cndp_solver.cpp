@@ -6,12 +6,7 @@
 #include <stdexcept>
 #include <string>
 
-#ifdef _WIN32
-  #include <io.h>
-  #include <cstdio>
-#else
-  #include <unistd.h>
-#endif
+#include <unistd.h>
 
 #include "../include/common/TomlConfigLoader.h"
 #include "../include/cnd/BilevelCND.h"
@@ -67,7 +62,7 @@ CreateApproach(const CndpConfig& config, TrafficAssignment::Network<long double>
 
 void PrintHelp() {
   std::cout
-    << "Usage: cndp_solver.exe --config <path> [options]\n\n"
+    << "Usage: cndp_solver --config <path> [options]\n\n"
     << "Layering: defaults -> TOML config file -> environment -> CLI\n\n"
     << "Optimization steps are defined via [[pipeline]] in the TOML config file.\n"
     << "Example:\n"
@@ -216,11 +211,7 @@ int main(int argc, char** argv) {
 
     // Resolve "auto" progress format: use bar for TTY, line for piped stdout
     if (config.output.progress_format == "auto") {
-      #ifdef _WIN32
-        config.output.progress_format = _isatty(_fileno(stdout)) ? "bar" : "line";
-      #else
-        config.output.progress_format = isatty(STDOUT_FILENO) ? "bar" : "line";
-      #endif
+      config.output.progress_format = isatty(STDOUT_FILENO) ? "bar" : "line";
     }
 
     // Resolve quiet mode: auto = quiet when stdout is piped
@@ -231,11 +222,7 @@ int main(int argc, char** argv) {
       quiet = false;
     } else {
       // auto: quiet when stdout is not a TTY (piped)
-      #ifdef _WIN32
-        quiet = !_isatty(_fileno(stdout));
-      #else
-        quiet = !isatty(STDOUT_FILENO);
-      #endif
+      quiet = !isatty(STDOUT_FILENO);
     }
 
     // When quiet, force line progress format (structured output only)

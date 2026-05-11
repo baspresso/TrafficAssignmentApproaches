@@ -442,7 +442,7 @@ def main():
     )
     parser.add_argument(
         "--exe", type=str,
-        help="Path to cndp_solver.exe (default: build/mingw-vcpkg-release/cndp_solver.exe)",
+        help="Path to cndp_solver binary (default: build/linux-release/cndp_solver)",
     )
 
     args = parser.parse_args()

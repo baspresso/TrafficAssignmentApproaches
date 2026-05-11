@@ -4,7 +4,7 @@ This repository presents a set of algorithmic implementations designed to solve 
 
 ## Problem Overview
 
-The Traffic Assignment Problem (TAP) involves determining an equilibrium distribution of traffic flows across a transportation network, such that no traveler can reduce their travel time by unilaterally changing routes. This condition corresponds to **Wardrop’s first principle of user equilibrium**. TAP is fundamental to transportation systems analysis and infrastructure planning, as it captures the interaction between route choices and network congestion.
+The Traffic Assignment Problem (TAP) involves determining an equilibrium distribution of traffic flows across a transportation network, such that no traveler can reduce their travel time by unilaterally changing routes. This condition corresponds to **Wardrop's first principle of user equilibrium**. TAP is fundamental to transportation systems analysis and infrastructure planning, as it captures the interaction between route choices and network congestion.
 
 Mathematically, TAP is often formulated as a convex optimization problem with nonlinear cost functions, representing travel time as a function of link load. Solving this problem with high precision is particularly important in bilevel applications such as network design and congestion pricing.
 
@@ -12,104 +12,107 @@ Mathematically, TAP is often formulated as a convex optimization problem with no
 
 The repository includes the following classes of traffic assignment methods:
 
-- **Path-based Methods**  
+- **Path-based Methods**
   Manage flow distributions across explicit paths for each origin–destination (OD) pair. This approach supports high-precision computation and direct access to route-level flow information. The implementation follows a route-equilibration strategy grounded in recent academic literature.
 
 
-- **TAPAS (Traffic Assignment by Paired Alternative Segments)**  
+- **TAPAS (Traffic Assignment by Paired Alternative Segments)**
   A refinement of bush-based algorithms that employs paired segments with common endpoints but disjoint paths. TAPAS supports both line-search and Newton-step flow updates, allowing for fast and accurate convergence. This method is especially effective in high-precision applications.
 
-- **Demand-based Method (Novel Contribution)**  
+- **Demand-based Method (Novel Contribution)**
   A newly developed algorithm introduced by the author, which models dynamic redistribution of OD demand through the network. The approach uses a pump-out mechanism to iteratively reassign unmet demand. While preliminary results indicate lower accuracy and slower convergence, the method presents a promising direction for further investigation.
 
 ## Technical Implementation
 
-- **Programming Languages**  
-  - Core algorithm implementations: **C++**  
-  - Data preprocessing: **Python**
+- **Programming Languages**
+  - Core algorithm implementations: **C++20**
+  - Data preprocessing and experiment orchestration: **Python**
 
-- **Build System**  
-  The project uses **CMake** for compilation and build configuration, supporting modern C++ development workflows.
+- **Build System**
+  CMake (>= 3.14) with Ninja, using system-installed Eigen3, NLopt, and Boost.
 
-## Build and Run (PowerShell)
+## Build and Run
 
-The repository now includes `CMakePresets.json` with a fixed MinGW + vcpkg toolchain setup.
+### Prerequisites (Ubuntu/Debian)
 
-If you already have an old/incompatible `build` cache, do a one-time cleanup:
-```powershell
-Remove-Item -Recurse -Force .\build
+```bash
+sudo apt install build-essential cmake ninja-build pkg-config \
+                 libeigen3-dev libnlopt-cxx-dev libboost-all-dev
 ```
 
-1. Configure (`Release` / `Debug`):
-```powershell
-cmake --preset mingw-vcpkg-release
-cmake --preset mingw-vcpkg-debug
+(`toml++` and `OptimLib` are fetched automatically by CMake `FetchContent`.)
+
+### Configure
+
+```bash
+cmake --preset linux-release           # or linux-debug, linux-relwithdebinfo
 ```
 
-2. Build:
-```powershell
-cmake --build --preset build-release
-cmake --build --preset build-debug
+### Build
+
+```bash
+cmake --build --preset build-release   # or build-debug, build-relwithdebinfo
 ```
 
-3. Run:
-```powershell
-.\build\mingw-vcpkg-release\cndp_solver.exe
-.\build\mingw-vcpkg-debug\cndp_solver.exe
+### Run
+
+```bash
+./build/linux-release/cndp_solver --config configs/cnd.siouxfalls.toml
+./build/linux-release/cndp_solver --help
 ```
 
-## Layered Runtime Config (defaults -> config -> env -> CLI)
+A separate standalone TAP solver is also produced:
 
-`cndp_solver.exe` now supports layered configuration:
+```bash
+./build/linux-release/tap_solver --config configs/tap.siouxfalls.toml
+```
+
+## Layered Runtime Config (defaults → config → env → CLI)
+
+`cndp_solver` supports layered configuration:
 
 - Defaults in code
-- INI config file (`--config ...` or `CND_CONFIG`)
+- TOML config file (`--config ...` or `CND_CONFIG`)
 - Environment variable overrides (`CND_*`)
 - CLI overrides (highest priority)
 
-Example config file:
-
-- [configs/cnd.siouxfalls.ini](/c:/Projects/TrafficAssignmentApproaches/configs/cnd.siouxfalls.ini)
+Example config file: [`configs/cnd.siouxfalls.toml`](configs/cnd.siouxfalls.toml).
 
 Run using config only:
-```powershell
-.\build\mingw-vcpkg-release\cndp_solver.exe --config .\configs\cnd.siouxfalls.ini
+
+```bash
+./build/linux-release/cndp_solver --config configs/cnd.siouxfalls.toml
 ```
 
 Run with environment override:
-```powershell
-$env:CND_ROUTE_THREADS = "1"
-.\build\mingw-vcpkg-release\cndp_solver.exe --config .\configs\cnd.siouxfalls.ini
+
+```bash
+CND_ROUTE_THREADS=1 ./build/linux-release/cndp_solver --config configs/cnd.siouxfalls.toml
 ```
 
 Run with CLI override (wins over env + file):
-```powershell
-$env:CND_ROUTE_THREADS = "1"
-.\build\mingw-vcpkg-release\cndp_solver.exe --config .\configs\cnd.siouxfalls.ini --route-threads 2 --max-standard-iters 150
+
+```bash
+CND_ROUTE_THREADS=1 ./build/linux-release/cndp_solver \
+    --config configs/cnd.siouxfalls.toml \
+    --route-threads 2 \
+    --max-standard-iters 150
 ```
 
 Show all available options:
-```powershell
-.\build\mingw-vcpkg-release\cndp_solver.exe --help
-```
 
-For regular work you usually only need one pair configure/build commands for the selected preset.
-
-`RelWithDebInfo` is also available:
-```powershell
-cmake --preset mingw-vcpkg-relwithdebinfo
-cmake --build --preset build-relwithdebinfo
-.\build\mingw-vcpkg-relwithdebinfo\cndp_solver.exe
+```bash
+./build/linux-release/cndp_solver --help
 ```
 
 ## Benchmark Networks
 
 The following standardized test networks are used to evaluate algorithmic performance:
 
-- **Sioux Falls Network**  
+- **Sioux Falls Network**
   24 nodes, 24 zones, 76 links
 
-- **Anaheim Network**  
+- **Anaheim Network**
   416 nodes, 38 zones, 914 links
 
 These networks are sourced from the open-access [Transportation Networks for Research](https://github.com/bstabler/TransportationNetworks) repository and conform to the TNTP format. Each instance includes a demand matrix and BPR-formulated travel time functions.

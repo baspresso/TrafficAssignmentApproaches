@@ -4,21 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build System
 
-C++20 project using CMake + Ninja + MinGW + vcpkg. Dependencies: Eigen3, Boost.Multiprecision, NLopt, toml++ (FetchContent), OptimLib (FetchContent).
+C++20 project using CMake + Ninja on Linux. Dependencies are installed via apt: Eigen3, Boost.Multiprecision, NLopt. toml++ and OptimLib are fetched at configure time via CMake `FetchContent`.
 
 ```bash
+# Prerequisites (Ubuntu/Debian)
+sudo apt install build-essential cmake ninja-build pkg-config \
+                 libeigen3-dev libnlopt-cxx-dev libboost-all-dev
+
 # Configure
-cmake --preset mingw-vcpkg-release    # or mingw-vcpkg-debug / mingw-vcpkg-relwithdebinfo
+cmake --preset linux-release    # or linux-debug / linux-relwithdebinfo
 
 # Build
 cmake --build --preset build-release  # or build-debug / build-relwithdebinfo
 
 # Run
-./build/mingw-vcpkg-release/cndp_solver.exe --config configs/cnd.siouxfalls.toml
-./build/mingw-vcpkg-release/cndp_solver.exe --help
+./build/linux-release/cndp_solver --config configs/cnd.siouxfalls.toml
+./build/linux-release/cndp_solver --help
 ```
 
-Two executables: `cndp_solver.exe` (CNDP solver) and `tap_solver.exe` (standalone TAP solver). Build output goes to `build/<preset-name>/`. No automated tests — validation is done by running experiments and inspecting metrics outputs.
+Two executables: `cndp_solver` (CNDP solver) and `tap_solver` (standalone TAP solver). Build output goes to `build/<preset-name>/`. No automated tests — validation is done by running experiments and inspecting metrics outputs.
 
 ## Architecture
 
@@ -63,7 +67,7 @@ Two solver implementations, both implementing `TrafficAssignmentApproach<T>`:
 TOML-based layered config system with precedence: **defaults → TOML file → environment variables → CLI args**.
 
 ```bash
-./build/mingw-vcpkg-release/cndp_solver.exe \
+./build/linux-release/cndp_solver \
   --config ./configs/cnd.siouxfalls.toml \
   --route-threads 2 \
   --max-standard-iters 150
