@@ -523,7 +523,7 @@ private:
    */
   double EvaluateObjectiveCore(CndOptimizationContext<T>& ctx,
                                 const std::vector<double>& x,
-                                const std::vector<double>& lower_bounds,
+                                const std::vector<double>& /*lower_bounds*/,
                                 int n_vars,
                                 bool show_progress) {
     // Set capacities

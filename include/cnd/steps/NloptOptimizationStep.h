@@ -128,7 +128,7 @@ public:
 
     try {
       optimizer.optimize(x, minf);
-    } catch (...) {
+    } catch (...) {  // intentional catch-all: clean up state, then rethrow unchanged
       progress_.Finish();
       ctx_ = nullptr;
       throw;

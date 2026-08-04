@@ -9,9 +9,12 @@
 #include <sstream>
 #include <iostream>
 
-namespace fs = std::filesystem;
-
 namespace TrafficAssignment {
+
+// Scoped to the project namespace (matching ConfigUtils.h / TomlConfigLoader.h)
+// instead of leaking a global `fs` into every translation unit that includes
+// this header.
+namespace fs = std::filesystem;
 
 /**
  * @brief Loads transportation network data from TNTP-format CSV files.
@@ -24,29 +27,32 @@ class NetworkBuilder {
 public:
     NetworkBuilder() = default;
 
+    /// @brief Default dataset root, relative to the working directory (CLI behavior).
+    static constexpr const char* kDefaultDataRoot = "data/TransportationNetworks";
+
     /// @brief Loads and builds a complete Network from a named TNTP dataset.
+    /// @param data_root Directory containing per-dataset subdirectories.
     template <typename T>
-    Network<T> BuildFromDataset(const std::string& dataset_name) {
+    Network<T> BuildFromDataset(const std::string& dataset_name,
+                                const fs::path& data_root = kDefaultDataRoot) {
         std::string name = dataset_name;
-        auto [nodes, zones, links] = LoadNetworkData<T>(dataset_name);
-        auto trips = LoadTripData<T>(dataset_name, zones);
+        auto [nodes, zones, links] = LoadNetworkData<T>(dataset_name, data_root);
+        auto trips = LoadTripData<T>(dataset_name, zones, data_root);
         auto [adjacency, reverse_adjacency] = BuildAdjacencyLists<T>(links, nodes);
-        
-        return Network<T>(name, nodes, zones, 
-            links, trips, 
+
+        return Network<T>(name, nodes, zones,
+            links, trips,
             adjacency, reverse_adjacency
         );
     }
 
-private:
     /// @brief Parses network metadata and link data from the *_net.csv file.
     template <typename T>
     std::tuple<int, int, std::vector<Link<T>>>
-    LoadNetworkData(const std::string& dataset_name) {
-        namespace fs = std::filesystem;
-        
+    LoadNetworkData(const std::string& dataset_name,
+                    const fs::path& data_root = kDefaultDataRoot) {
         // Path construction
-        fs::path net_path = GetDatasetPath(dataset_name) / (dataset_name + "_net.csv");
+        fs::path net_path = GetDatasetPath(dataset_name, data_root) / (dataset_name + "_net.csv");
         std::ifstream net_file(net_path);
         
         if(!net_file.is_open()) {
@@ -73,10 +79,9 @@ private:
 
     /// @brief Reads the OD demand matrix from the *_trips.csv file.
     template <typename T>
-    std::vector<std::vector<T>> LoadTripData(const std::string& dataset_name, int zones) {
-        namespace fs = std::filesystem;
-        
-        fs::path trip_path = GetDatasetPath(dataset_name) / (dataset_name + "_trips.csv");
+    std::vector<std::vector<T>> LoadTripData(const std::string& dataset_name, int zones,
+                                             const fs::path& data_root = kDefaultDataRoot) {
+        fs::path trip_path = GetDatasetPath(dataset_name, data_root) / (dataset_name + "_trips.csv");
         std::ifstream trip_file(trip_path);
         
         if(!trip_file.is_open()) {
@@ -110,19 +115,19 @@ private:
         std::vector<std::vector<int>> adjacency(node_count);
         std::vector<std::vector<int>> reverse_adjacency(node_count);
 
-        for(int i = 0; i < links.size(); ++i) {
+        for(std::size_t i = 0; i < links.size(); ++i) {
             const auto& link = links[i];
-            adjacency[link.init].push_back(i);
-            reverse_adjacency[link.term].push_back(i);
+            adjacency[link.init].push_back(static_cast<int>(i));
+            reverse_adjacency[link.term].push_back(static_cast<int>(i));
         }
 
         return {adjacency, reverse_adjacency};
     }
 
+private:
     // Helper methods
-    fs::path GetDatasetPath(const std::string& dataset_name) {
-        static const fs::path base_path = "data/TransportationNetworks";
-        return base_path / dataset_name;
+    fs::path GetDatasetPath(const std::string& dataset_name, const fs::path& data_root) {
+        return data_root / dataset_name;
     }
 
     void ParseNetworkMetadata(const std::string& line, int& nodes, int& zones, int& links) {

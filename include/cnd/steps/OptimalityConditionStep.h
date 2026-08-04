@@ -135,7 +135,7 @@ public:
           progress_budget_function
         );
       }
-    } catch (...) {
+    } catch (...) {  // intentional catch-all: clean up progress bar, then rethrow unchanged
       progress.Finish();
       throw;
     }

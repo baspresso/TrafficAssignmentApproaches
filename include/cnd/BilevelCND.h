@@ -123,6 +123,18 @@ public:
     verbose_ = verbose;
   }
 
+  /// @brief When disabled, skips all metrics recording: no output directory,
+  ///        trace CSV, metadata JSON, or summary CSV is created. Default: enabled.
+  void SetStatisticsEnabled(bool enabled) {
+    statistics_enabled_ = enabled;
+  }
+
+  /// @brief When disabled, skips the post-run optimality-condition diagnostic
+  ///        and the solution/optimality CSV dumps. Default: enabled.
+  void SetFinalDiagnosticsEnabled(bool enabled) {
+    final_diagnostics_enabled_ = enabled;
+  }
+
   /**
    * @brief Main entry point: builds pipeline, creates context, executes, and records results.
    *
@@ -155,7 +167,7 @@ public:
       pipeline.Execute(ctx);
 
       ComputeFinalResults(optimization_start_time, counters);
-    } catch (...) {
+    } catch (...) {  // intentional catch-all: record partial results, then rethrow unchanged
       const double failed_elapsed_seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - optimization_start_time)
           .count();
@@ -186,6 +198,8 @@ private:
   T budget_function_multiplier_;               ///< theta: investment cost multiplier. Chiou (2005) Eq. 2.
   double budget_upper_bound_;                  ///< B: maximum allowable investment budget.
   bool verbose_;
+  bool statistics_enabled_ = true;             ///< Master switch for metrics recording/output.
+  bool final_diagnostics_enabled_ = true;      ///< Post-run optimality diagnostic + CSV dumps.
 
   // --- Statistics ---
   CndStatisticsRecorder<T> statistics_recorder_;
@@ -307,8 +321,10 @@ private:
       true
     );
 
-    statistics_recorder_.WriteSolutionCSV(constraints_);
-    RecordStatistics(ctx);
+    if (final_diagnostics_enabled_) {
+      statistics_recorder_.WriteSolutionCSV(constraints_);
+      RecordStatistics(ctx);
+    }
   }
 
   // =====================================================================
@@ -316,7 +332,8 @@ private:
   // =====================================================================
 
   void StartStatisticsRecording(
-      typename CndOptimizationContext<T>::RuntimeCounters& counters) {
+      typename CndOptimizationContext<T>::RuntimeCounters& /*counters*/) {
+    if (!statistics_enabled_) return;
     CndRunMetadata metadata;
     metadata.dataset_name = network_.name();
     metadata.approach_name = approach_ ? approach_->GetApproachName() : "UnknownApproach";

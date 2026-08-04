@@ -48,7 +48,7 @@ public:
       if (ctx.verbose) {
         std::cout << step->GetName() << "-start\n";
       }
-      StepResult result = step->Execute(ctx);
+      step->Execute(ctx);  // return value intentionally unused: metrics are recomputed below
 
       // Post-step: TA computation for consistency + log quality time point
       double post_step_ta_seconds = 0.0;

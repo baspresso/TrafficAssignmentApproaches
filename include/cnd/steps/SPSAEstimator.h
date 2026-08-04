@@ -37,8 +37,8 @@ public:
   std::string GetName() const override { return "spsa"; }
 
   void ComputeGradient(
-    CndOptimizationContext<T>& ctx,
-    const std::vector<double>& x, double f_x,
+    CndOptimizationContext<T>& /*ctx*/,
+    const std::vector<double>& x, double /*f_x*/,
     const std::vector<double>& lower_bounds,
     const std::vector<double>& upper_bounds,
     int n_vars, std::vector<long double>& grad,
@@ -105,7 +105,7 @@ public:
   }
 
   int LastEvalCount() const override { return last_eval_count_; }
-  int ExpectedEvalsPerGradient(int n_vars) const override {
+  int ExpectedEvalsPerGradient(int /*n_vars*/) const override {
     // int num_samples = std::max(1, std::min(20,
     //     static_cast<int>(std::ceil(std::sqrt(static_cast<double>(n_vars))))));
     int num_samples = 3;

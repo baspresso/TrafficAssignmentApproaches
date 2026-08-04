@@ -151,9 +151,9 @@ public:
       link_capacity_selection_threshold(link_capacity_selection_threshold_val),
       route_search_thread_count(route_search_thread_count_val),
       verbose(verbose_val),
+      progress_format(progress_format_val),
       counters(counters_ref),
-      statistics_recorder(statistics_recorder_ref),
-      progress_format(progress_format_val) {}
+      statistics_recorder(statistics_recorder_ref) {}
 
   // --- Utility methods ---
 

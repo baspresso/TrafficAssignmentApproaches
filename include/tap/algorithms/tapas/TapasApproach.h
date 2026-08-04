@@ -217,7 +217,7 @@ namespace TrafficAssignment {
     // Equilibration iteration
     // =========================================================================
 
-    void EquilibrationIteration(int iteration_number) {
+    void EquilibrationIteration(int /*iteration_number*/) {
       std::vector<int> order(number_of_origins_);
       std::iota(order.begin(), order.end(), 0);
       std::shuffle(order.begin(), order.end(), rng_);

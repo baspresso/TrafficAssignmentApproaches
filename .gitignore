@@ -15,7 +15,11 @@ cmake_install.cmake
 .vs/
 CMakeSettings.json
 
-# Claude Code
-.claude
-
 .venv
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.eggs/

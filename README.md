@@ -67,6 +67,50 @@ A separate standalone TAP solver is also produced:
 ./build/linux-release/tap_solver --config configs/tap.siouxfalls.toml
 ```
 
+## Python Package
+
+The solvers are also available as a Python package (`traffic_assignment`) with
+pybind11 bindings to the same C++ core (same `long double` numerics as the
+executables). Install it in editable mode from the repository root:
+
+```bash
+pip install -e .            # builds the native extension via scikit-build-core
+pip install -e .[test]      # with pytest, then run: pytest tests/
+```
+
+Solve TAP and CNDP directly from Python:
+
+```python
+import traffic_assignment as ta
+
+# User equilibrium (TAP); dataset resolved from data/TransportationNetworks
+result = ta.solve_tap("SiouxFalls", approach="tapas")
+print(result.relative_gap, result.total_travel_time, result.flows)
+
+# Bilevel CNDP with a pipeline of optimization steps
+design = ta.solve_cndp(
+    "SiouxFalls",
+    [ta.step("nlopt", algorithm="LN_COBYLA", max_iterations=100)],
+    budget=10000.0,
+)
+print(design.objective, design.capacities)
+
+# Networks can also be built programmatically from arrays
+network = ta.network_from_arrays(
+    "TwoRoutes", init_node=[0, 0, 2], term_node=[1, 2, 1],
+    capacity=10.0, free_flow_time=[2.0, 1.0, 1.0], b=1.0, power=1.0,
+    demand=[[0.0, 10.0], [0.0, 0.0]], n_nodes=3,
+)
+```
+
+`solve_tap` / `solve_cndp` return result dataclasses with NumPy arrays; the
+underlying objects (`Network`, `TapasApproach`, `RouteBasedApproach`,
+`BilevelCND`, ...) are exposed for object-level workflows. CNDP file outputs
+(trace CSV, metadata JSON, summary CSV) are off by default and enabled by
+passing a `metrics=` config. Dataset discovery walks up from the working
+directory looking for `data/TransportationNetworks`; override with the
+`data_root=` argument or the `TRAFFIC_ASSIGNMENT_DATA` environment variable.
+
 ## Layered Runtime Config (defaults → config → env → CLI)
 
 `cndp_solver` supports layered configuration:

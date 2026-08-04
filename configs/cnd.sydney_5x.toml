@@ -1,11 +1,11 @@
 [network]
-dataset = "SiouxFalls"
+dataset = "Sydney_demand_5x"
 
 [solver]
 approach = "Tapas"
-approach_alpha = 1e-14
-budget_function_multiplier = 5.0
-budget_upper_bound = 100_000.0
+approach_alpha = 1e-10
+budget_function_multiplier = 0.1
+budget_upper_bound = 800.0
 
 [metrics]
 enable_trace = true

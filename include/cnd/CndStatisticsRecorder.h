@@ -14,10 +14,9 @@
 #include <string>
 #include <vector>
 #include "../tap/core/Network.h"
+#include "LinkConstraint.h"  // DirectedLinkCapacityConstraint (complete type; used by WriteSolutionCSV)
 
 namespace TrafficAssignment {
-
-struct DirectedLinkCapacityConstraint;  // forward declaration (defined in DirectedConstraintLoader.h)
 
 /**
  * @brief Configuration for CNDP metrics collection and output.

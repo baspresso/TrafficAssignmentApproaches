@@ -26,8 +26,7 @@ namespace TrafficAssignment {
     /// @brief Computes Newton-step flow shift between min-cost and max-cost routes.
     std::vector <T> FlowShift(int od_index) {
       auto& od_pair = this->od_pairs()[od_index];
-      const int routes_count = od_pair.GetRoutesCount();
-      auto [min_max_diff, min_index, max_index] = MinMaxRoutes(od_pair); 
+      auto [min_max_diff, min_index, max_index] = MinMaxRoutes(od_pair);
       if (min_max_diff < computational_threshold_) {
         return od_pair.GetRoutesFlow();
       }

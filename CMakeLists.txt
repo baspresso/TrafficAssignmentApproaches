@@ -35,12 +35,15 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(tomlplusplus)
 
 # --- OptimLib (header-only-like usage via compiled static library) ---
+# Pinned to a specific commit for reproducible builds (was: master).
+# GIT_SHALLOW is intentionally omitted: a shallow fetch of an arbitrary commit
+# SHA is rejected by GitHub (only branch tips are advertised), so a full clone
+# is required to check out a pinned hash.
 FetchContent_Declare(
     optimlib
     GIT_REPOSITORY https://github.com/kthohr/optim.git
-    GIT_TAG        master
+    GIT_TAG        5453f48aca695e6fef123677f35cb4d22e356e73
     GIT_SUBMODULES include/BaseMatrixOps
-    GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(optimlib)
 
@@ -60,9 +63,12 @@ add_library(optimlib STATIC
     ${optimlib_SOURCE_DIR}/src/zeros/broyden.cpp
     ${optimlib_SOURCE_DIR}/src/zeros/broyden_df.cpp
 )
-target_include_directories(optimlib PUBLIC ${optimlib_SOURCE_DIR}/include)
+# SYSTEM so -Wall/-Wextra on first-party targets don't flag optim's own headers.
+target_include_directories(optimlib SYSTEM PUBLIC ${optimlib_SOURCE_DIR}/include)
 target_compile_definitions(optimlib PUBLIC OPTIM_ENABLE_EIGEN_WRAPPERS)
 target_link_libraries(optimlib PUBLIC Eigen3::Eigen)
+# Required to link the static lib into the Python shared module.
+set_target_properties(optimlib PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_executable(cndp_solver src/cndp_solver.cpp)
 
@@ -81,3 +87,25 @@ target_link_libraries(tap_solver PRIVATE
     Boost::headers
     tomlplusplus::tomlplusplus
 )
+
+# Warning flags on first-party targets only (not third-party FetchContent libs).
+set(TA_WARNING_FLAGS $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra>)
+target_compile_options(cndp_solver PRIVATE ${TA_WARNING_FLAGS})
+target_compile_options(tap_solver PRIVATE ${TA_WARNING_FLAGS})
+
+# --- Python bindings (traffic_assignment._core) ---
+# Built by scikit-build-core via pyproject.toml; OFF for plain CLI builds.
+option(BUILD_PYTHON_BINDINGS "Build the traffic_assignment Python extension module" OFF)
+
+if(BUILD_PYTHON_BINDINGS)
+    find_package(pybind11 CONFIG REQUIRED)
+    pybind11_add_module(_core bindings/py_bindings.cpp)
+    target_link_libraries(_core PRIVATE
+        Eigen3::Eigen
+        Boost::headers
+        NLopt::nlopt
+        optimlib
+    )
+    target_compile_options(_core PRIVATE ${TA_WARNING_FLAGS})
+    install(TARGETS _core DESTINATION traffic_assignment COMPONENT python)
+endif()

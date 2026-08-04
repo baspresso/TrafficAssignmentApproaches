@@ -11,54 +11,9 @@
 #include <algorithm>
 #include <optional>
 #include <iomanip>
-#include "BilevelCND.h"
+#include "LinkConstraint.h"  // DirectedLinkCapacityConstraint
 
 namespace TrafficAssignment {
-
-/**
- * @class DirectedLinkCapacityConstraint
- * @brief Represents a constraint for a directed link (arc) in the network
- *
- * This structure represents capacity constraints for directed arcs,
- * identified by their origin (init_node) and destination (term_node) nodes.
- */
-struct DirectedLinkCapacityConstraint {
-  std::size_t init_node;               // Origin node
-  std::size_t term_node;               // Destination node
-  double lower_bound;                  // Minimum capacity
-  double upper_bound;                  // Maximum capacity
-  double investment_cost_param;        // Cost per unit capacity
-
-  DirectedLinkCapacityConstraint() = default;
-
-  DirectedLinkCapacityConstraint(
-    std::size_t origin,
-    std::size_t destination,
-    double lb,
-    double ub,
-    double cost)
-    : init_node(origin),
-      term_node(destination),
-      lower_bound(lb),
-      upper_bound(ub),
-      investment_cost_param(cost) {}
-
-  /**
-   * @brief Get string representation for logging
-   */
-  std::string ToString() const {
-    return std::string("(") + std::to_string(init_node) + "->" +
-           std::to_string(term_node) + ")";
-  }
-
-  /**
-   * @brief Get unique arc ID (for compatibility with undirected networks)
-   * Format: "init_node_term_node"
-   */
-  std::string GetArcID() const {
-    return std::to_string(init_node) + "_" + std::to_string(term_node);
-  }
-};
 
 /**
  * @class DirectedConstraintCSVFormat
@@ -314,7 +269,7 @@ public:
     const std::string& filepath,
     //BilevelCND<double>& solver,
     const std::map<std::pair<std::size_t, std::size_t>, std::size_t>*
-      arc_link_mapping = nullptr) {
+      /*arc_link_mapping*/ = nullptr) {
     
     auto constraints = LoadFromFile(filepath);
   }

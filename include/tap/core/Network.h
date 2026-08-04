@@ -49,6 +49,16 @@ public:
     /// @brief Default destructor (uses default container destruction).
     ~Network() = default;
 
+    // Non-copyable and non-movable: each OriginDestinationPair stores a
+    // reference back to its owning Network, so copying or moving a Network
+    // would leave those references dangling (pointing at the source object).
+    // Construct in place and pass by reference or pointer; all current call
+    // sites rely on guaranteed copy elision (prvalue returns) or heap allocation.
+    Network(const Network&) = delete;
+    Network& operator=(const Network&) = delete;
+    Network(Network&&) = delete;
+    Network& operator=(Network&&) = delete;
+
     // Network metadata accessors
     // ---------------------------
     
@@ -318,7 +328,7 @@ private:
     }
 
     void InitializeLinkIDMap() {
-      for (int i = 0; i < links_.size(); i++) {
+      for (std::size_t i = 0; i < links_.size(); i++) {
         link_id_map_[{links_[i].init, links_[i].term}] = i;
       }
     }

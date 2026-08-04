@@ -49,8 +49,6 @@ public:
         
         PauseRecording();
 
-        auto statistics_start = std::chrono::high_resolution_clock::now();
-        
         file.open(file_path_, std::ios::app);
         const T rgap = network_.RelativeGap();
         const T objective = network_.ObjectiveFunction();
@@ -104,11 +102,6 @@ private:
         const std::string base = output_root_.empty() ? "../performance_results" : output_root_;
         const std::string dir_path = base + "/" + dataset_name_;
         std::filesystem::create_directories(dir_path);
-        
-        // Create unique filename
-        const auto now = std::chrono::system_clock::now();
-        const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now.time_since_epoch()).count();
         
         file_path_ = dir_path + "/" + approach_name_ + ".csv";
         

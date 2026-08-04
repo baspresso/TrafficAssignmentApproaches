@@ -10,6 +10,7 @@
 #include <limits>
 #include <stdexcept>
 #include <functional>
+#include <iostream>
 
 #ifndef OPTIM_ENABLE_EIGEN_WRAPPERS
 #define OPTIM_ENABLE_EIGEN_WRAPPERS
@@ -158,7 +159,7 @@ public:
           "'. Supported: DE, DE_PRMM, PSO, PSO_DV, NM, GD."
         );
       }
-    } catch (...) {
+    } catch (...) {  // intentional catch-all: clean up state, then rethrow unchanged
       progress_.Finish();
       ctx_ = nullptr;
       throw;
@@ -258,7 +259,10 @@ private:
       }
     }
 
-    double ta_compute_seconds = 0.0;
+    // volatile: assigned inside the setjmp-protected block below, so it must
+    // survive a longjmp from the SIGSEGV handler (avoids -Wclobbered and the
+    // associated undefined behavior). All later uses read it by value.
+    volatile double ta_compute_seconds = 0.0;
     // Population-based methods explore far from the feasible region.
     // The TA solver (especially Tapas) can segfault with pathological
     // capacity combinations. Use signal handling to catch SIGSEGV.
@@ -267,7 +271,16 @@ private:
       for (int i = 0; i < ctx.network.number_of_links(); ++i) {
         ctx.network.mutable_links()[i].flow = T(0);
       }
-      try { ctx.approach->Reset(); } catch (...) {}
+      try {
+        ctx.approach->Reset();
+      } catch (const std::exception& e) {
+        // Best-effort reset before re-solving: surface the reason instead of
+        // swallowing it silently, but keep going (population-based methods can
+        // tolerate a failed reset for a single candidate).
+        if (ctx.verbose) {
+          std::cout << "\n[WARN] approach Reset() failed: " << e.what() << "\n";
+        }
+      }
       needs_reset_ = false;
     }
 

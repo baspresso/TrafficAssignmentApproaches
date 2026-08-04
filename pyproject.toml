@@ -1,0 +1,26 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=3.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "traffic-assignment"
+version = "0.1.0"
+description = "Traffic Assignment (TAP) and bilevel Continuous Network Design (CNDP) solvers"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.scikit-build]
+build-dir = "build/python"
+wheel.packages = ["python/traffic_assignment"]
+build.targets = ["_core"]
+install.components = ["python"]
+
+[tool.scikit-build.cmake.define]
+BUILD_PYTHON_BINDINGS = "ON"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

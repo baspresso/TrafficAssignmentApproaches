@@ -28,7 +28,7 @@ public:
   std::string GetName() const override { return "finite_difference"; }
 
   void ComputeGradient(
-    CndOptimizationContext<T>& ctx,
+    CndOptimizationContext<T>& /*ctx*/,
     const std::vector<double>& x, double f_x,
     const std::vector<double>& lower_bounds,
     const std::vector<double>& upper_bounds,

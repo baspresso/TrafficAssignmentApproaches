@@ -38,11 +38,11 @@ namespace TrafficAssignment {
                        int origin_iteration_count = 1,
                        T ema_alpha = 0.7)
       : TrafficAssignmentApproach<T>(network, alpha),
-        route_search_thread_count_(NormalizeThreadCount(route_search_thread_count)),
         max_iterations_(max_iterations),
         full_iteration_count_(full_iteration_count),
         origin_iteration_count_(origin_iteration_count),
-        ema_alpha_(ema_alpha)
+        ema_alpha_(ema_alpha),
+        route_search_thread_count_(NormalizeThreadCount(route_search_thread_count))
     {
         shift_method_ = RouteBasedShiftMethodFactory<T>::GetInstance().Create(shift_method_name, this->network_);
         shift_method_name_ = shift_method_name;
