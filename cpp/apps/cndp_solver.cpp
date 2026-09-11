@@ -8,12 +8,9 @@
 
 #include <unistd.h>
 
-#include "../include/common/TomlConfigLoader.h"
-#include "../include/cnd/BilevelCND.h"
-#include "../include/cnd/DirectedConstraintLoader.h"
-#include "../include/tap/algorithms/route_based/RouteBasedApproach.h"
-#include "../include/tap/algorithms/tapas/TapasApproach.h"
-#include "../include/tap/core/NetworkBuilder.h"
+#include <traffic_assignment/solve.hpp>
+#include "common/RuntimeOptions.h"
+
 
 namespace fs = std::filesystem;
 
@@ -30,35 +27,6 @@ fs::path ResolveConstraintsPath(const CndpConfig& config, const fs::path& projec
   return ResolvePath(fs::path(config.network.constraints_file), project_root);
 }
 
-std::shared_ptr<TrafficAssignment::TrafficAssignmentApproach<long double>>
-CreateApproach(const CndpConfig& config, TrafficAssignment::Network<long double>& network) {
-  const std::string approach = ToLowerCopy(config.solver.approach);
-  if (approach == "routebased" || approach == "route_based") {
-    return std::make_shared<TrafficAssignment::RouteBasedApproach<long double>>(
-      network,
-      config.solver.approach_alpha,
-      config.solver.route_based.shift_method,
-      config.solver.route_based.route_search_threads,
-      config.solver.max_standard_iterations > 0 ? config.solver.max_standard_iterations : 200,
-      config.solver.route_based.full_iteration_count > 0 ? config.solver.route_based.full_iteration_count : 3,
-      config.solver.route_based.origin_iteration_count > 0 ? config.solver.route_based.origin_iteration_count : 1,
-      config.solver.route_based.ema_alpha > 0.0L ? config.solver.route_based.ema_alpha : 0.7L
-    );
-  }
-  if (approach == "tapas" || approach == "tasktapas" || approach == "task_tapas" || approach == "task") {
-    return std::make_shared<TrafficAssignment::TapasApproach<long double>>(
-      network,
-      config.solver.approach_alpha,
-      config.solver.max_standard_iterations > 0 ? config.solver.max_standard_iterations : 200,
-      config.solver.tapas.mu > 0.0L ? config.solver.tapas.mu : 0.5L,
-      config.solver.tapas.v > 0.0L ? config.solver.tapas.v : 0.25L
-    );
-  }
-  throw std::runtime_error(
-    "Unsupported approach '" + config.solver.approach +
-    "'. Supported: RouteBased, Tapas."
-  );
-}
 
 void PrintHelp() {
   std::cout
@@ -241,33 +209,12 @@ int main(int argc, char** argv) {
       PrintEffectiveConfig(config, project_root, constraints_path, config_path);
     }
 
-    TrafficAssignment::NetworkBuilder builder;
-    auto network = builder.BuildFromDataset<long double>(config.network.dataset);
-    auto approach = CreateApproach(config, network);
+    auto network = traffic_assignment::LoadNetwork(
+        config.network.dataset, (project_root / "data" / "TransportationNetworks").string());
+    auto approach = traffic_assignment::MakeApproach(network, ToTapOptions(config.solver));
 
-    TrafficAssignment::DirectedConstraintLoader loader;
-    loader.SetVerbose(config.output.verbose && !quiet);
-    auto constraints = loader.LoadFromFile(constraints_path.string());
-
-    // Exclude flow-insensitive links from optimization:
-    // - b ~ 0 or power ~ 0: delay independent of flow/capacity
-    // - free_flow_time ~ 0: delay always near zero regardless of capacity
-    int excluded_count = 0;
-    for (int i = 0; i < static_cast<int>(constraints.size()); ++i) {
-      const auto& link = network.links()[i];
-      if (std::abs(static_cast<double>(link.b)) < 1e-10 ||
-          std::abs(static_cast<double>(link.power)) < 1e-10 ||
-          std::abs(static_cast<double>(link.free_flow_time)) < 1e-10) {
-        constraints[i].upper_bound = constraints[i].lower_bound;
-        ++excluded_count;
-      }
-    }
-    int active_count = static_cast<int>(constraints.size()) - excluded_count;
-    if (!quiet) {
-      std::cout << "      Link filtering: " << excluded_count << " of " << constraints.size()
-                << " links excluded (b ~ 0, power ~ 0, or free_flow_time ~ 0), "
-                << active_count << " active design variables" << std::endl;
-    }
+    const auto constraints = traffic_assignment::LoadConstraints(
+        constraints_path.string(), config.output.verbose && !quiet);
 
     if (config.pipeline.empty()) {
       throw std::runtime_error(
@@ -283,21 +230,11 @@ int main(int argc, char** argv) {
     if (!quiet) {
       std::cout << "Creating BilevelCND solver..." << std::endl;
     }
-    TrafficAssignment::BilevelCND<long double> cnd(
-      network,
-      approach,
-      constraints,
-      config.pipeline,
-      config.solver.link_capacity_selection_threshold,
-      config.solver.budget_threshold,
-      config.solver.budget_function_multiplier,
-      config.solver.budget_upper_bound,
-      config.metrics,
-      config.solver.route_based.route_search_threads,
-      config.output.progress_format
-    );
-
-    cnd.SetVerbose(!quiet);
+    auto options = ToCndpOptions(config);
+    options.verbose = !quiet;
+    traffic_assignment::BilevelCND cnd(network, approach, constraints, config.pipeline, options);
+    const auto active_count = cnd.active_constraint_count();
+    const auto excluded_count = constraints.size() - active_count;
 
     if (!quiet) {
       std::cout << "      BilevelCND solver created" << std::endl;
@@ -310,7 +247,13 @@ int main(int argc, char** argv) {
       std::cout << "\nRunning bilevel optimization..." << std::endl;
     }
 
-    cnd.ComputeNetworkDesign();
+    const auto result = cnd.ComputeNetworkDesign();
+    // CLI protocol belongs to the application, not the reusable native solver.
+    std::cout << "[RESULT]"
+              << " optimization_time=" << std::fixed << std::setprecision(2) << result.elapsed_seconds
+              << " objective_function=" << std::setprecision(10) << result.objective
+              << " total_travel_time=" << result.total_travel_time
+              << " budget_function=" << result.budget << std::endl;
     return 0;
   } catch (const std::exception& ex) {
     std::cerr << "Fatal error: " << ex.what() << std::endl;

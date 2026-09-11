@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,18 +9,15 @@ import numpy as np
 
 from ._core import (
     BilevelCND,
-    LinkConstraint,
+    CndpOptions,
     MetricsConfig,
     Network,
     StepConfig,
+    TapOptions,
     TrafficAssignmentApproach,
 )
 from .datasets import default_constraints_path, load_constraints, load_network
 from .tap import make_approach
-
-# Links whose BPR delay cannot respond to capacity changes are pinned to their
-# lower bound, mirroring cndp_solver's design-variable filtering.
-_INSENSITIVE_EPS = 1e-10
 
 
 def step(type: str, **options) -> StepConfig:
@@ -80,7 +76,7 @@ class CndpResult:
 
 
 def solve_cndp(network: Network | str, pipeline, constraints=None, *,
-               approach: str | TrafficAssignmentApproach = "tapas",
+               approach: str | TapOptions | TrafficAssignmentApproach = "tapas",
                approach_options: dict | None = None, theta: float = 5.0,
                budget: float = 100000.0, budget_threshold: float = 0.1,
                link_threshold: float = 1e-3, route_search_threads: int = 1,
@@ -112,25 +108,6 @@ def solve_cndp(network: Network | str, pipeline, constraints=None, *,
         if not constraints_path.is_file():
             raise FileNotFoundError(f"Constraints file does not exist: {constraints_path}")
         constraints = load_constraints(constraints_path)
-    # Work on copies: the insensitive-link filter must not mutate caller objects.
-    constraints = [
-        LinkConstraint(c.init_node, c.term_node, c.lower_bound, c.upper_bound,
-                       c.investment_cost_param)
-        for c in constraints
-    ]
-    if len(constraints) != network.number_of_links:
-        raise ValueError(
-            f"constraints ({len(constraints)}) must have one entry per link "
-            f"({network.number_of_links})"
-        )
-
-    if exclude_insensitive_links:
-        for i, constraint in enumerate(constraints):
-            link = network.link(i)
-            if (abs(link.b) < _INSENSITIVE_EPS or abs(link.power) < _INSENSITIVE_EPS
-                    or abs(link.free_flow_time) < _INSENSITIVE_EPS):
-                constraint.upper_bound = constraint.lower_bound
-
     if isinstance(approach, TrafficAssignmentApproach):
         if approach_options:
             raise TypeError("approach_options are only valid when approach is given by name")
@@ -138,38 +115,31 @@ def solve_cndp(network: Network | str, pipeline, constraints=None, *,
     else:
         approach_obj = make_approach(network, approach, **(approach_options or {}))
 
-    solver = BilevelCND(
-        network, approach_obj, constraints, steps,
-        link_capacity_selection_threshold=link_threshold,
-        budget_threshold=budget_threshold,
-        budget_function_multiplier=theta,
-        budget_upper_bound=budget,
-        metrics=_as_metrics(metrics) if metrics is not None else MetricsConfig(),
-        route_search_threads=route_search_threads,
-        progress_format=progress,
-    )
-    solver.set_verbose(verbose)
-    solver.set_statistics_enabled(metrics is not None)
-    solver.set_final_diagnostics_enabled(final_diagnostics)
+    options = CndpOptions()
+    options.link_capacity_selection_threshold = link_threshold
+    options.budget_threshold = budget_threshold
+    options.budget_function_multiplier = theta
+    options.budget_upper_bound = budget
+    options.route_search_threads = route_search_threads
+    options.progress_format = progress
+    options.exclude_insensitive_links = exclude_insensitive_links
+    options.statistics_enabled = metrics is not None
+    options.final_diagnostics = final_diagnostics
+    options.verbose = verbose
+    if metrics is not None:
+        options.metrics = _as_metrics(metrics)
 
-    start = time.perf_counter()
-    solver.compute_network_design()
-    elapsed_seconds = time.perf_counter() - start
-
-    capacities = network.capacities()
-    lower_bounds = np.array([c.lower_bound for c in constraints])
-    upper_bounds = np.array([c.upper_bound for c in constraints])
-    budget_value = theta * float(np.sum(capacities - lower_bounds))
-    total_travel_time = network.total_travel_time()
+    solver = BilevelCND(network, approach_obj, constraints, steps, options)
+    native = solver.compute_network_design()
     return CndpResult(
-        objective=total_travel_time + budget_value,
-        total_travel_time=total_travel_time,
-        budget=budget_value,
-        budget_upper_bound=budget,
-        capacities=capacities,
-        flows=network.flows(),
-        lower_bounds=lower_bounds,
-        upper_bounds=upper_bounds,
-        elapsed_seconds=elapsed_seconds,
+        objective=native.objective,
+        total_travel_time=native.total_travel_time,
+        budget=native.budget,
+        budget_upper_bound=native.budget_upper_bound,
+        capacities=native.capacities,
+        flows=native.flows,
+        lower_bounds=native.lower_bounds,
+        upper_bounds=native.upper_bounds,
+        elapsed_seconds=native.elapsed_seconds,
         network=network,
     )

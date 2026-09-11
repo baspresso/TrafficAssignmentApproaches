@@ -2,6 +2,7 @@
 #define CND_STATISTICS_RECORDER_H
 
 #include <algorithm>
+#include <traffic_assignment/options.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cmath>
@@ -21,18 +22,7 @@ namespace TrafficAssignment {
 /**
  * @brief Configuration for CNDP metrics collection and output.
  */
-struct CndMetricsConfig {
-  bool enable_trace = true;             ///< Write per-iteration trace CSV (objective vs time).
-  bool enable_relative_gap = true;      ///< Sample TAP relative gap during trace recording.
-  int relative_gap_sample_period = 10;  ///< Sample RGAP every N trace points (expensive to compute).
-  int flush_every_n_points = 0;         ///< Flush trace to disk every N points (0 = flush at end).
-  bool write_metadata_json = true;      ///< Write JSON file with algorithm config and run parameters.
-  bool write_summary_csv = true;        ///< Append one-line summary to shared CSV (append-only).
-  bool append_dataset_subdir = true;    ///< Append dataset name as subdirectory to output_root.
-  std::string output_root = "performance_results"; ///< Root directory for all metrics output.
-  std::string run_id;                   ///< Unique run identifier (auto-generated if empty).
-  std::string scenario_name;            ///< Scenario label for grouping runs in analysis.
-};
+using CndMetricsConfig = traffic_assignment::MetricsConfig;
 
 /**
  * @brief Metadata describing a CNDP run (written to JSON and summary CSV).

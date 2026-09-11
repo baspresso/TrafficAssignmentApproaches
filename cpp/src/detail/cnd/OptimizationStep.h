@@ -2,6 +2,7 @@
 #define OPTIMIZATION_STEP_H
 
 #include <string>
+#include <traffic_assignment/options.hpp>
 
 namespace TrafficAssignment {
 
@@ -11,27 +12,7 @@ namespace TrafficAssignment {
  * Each [[pipeline]] TOML entry maps to one OptimizationStepConfig. The pipeline
  * executes steps sequentially, passing the best capacities forward as warm start.
  */
-struct OptimizationStepConfig {
-  std::string type;           ///< Step type: "nlopt", "optimality_condition", or "optimlib".
-  std::string name;           ///< Optional display name; auto-generated from type+algorithm if empty.
-  int max_iterations = 100;   ///< Maximum iterations/evaluations for this step.
-  double tolerance = 1e-4;    ///< Convergence tolerance (relative objective change).
-
-  // NLopt-specific
-  std::string algorithm;          ///< NLopt algorithm name (e.g., "LN_COBYLA", "GN_ISRES").
-  std::string local_algorithm;    ///< Local optimizer for composite algorithms (AUGLAG, global+local).
-  int local_max_iterations = 0;   ///< Max evaluations for local optimizer (0 = max_iterations/10).
-  double local_tolerance = 0.0;   ///< Convergence tolerance for local optimizer (0 = use main tolerance).
-
-  // Population-based (OptimLib) specific
-  int population_size = 0;  ///< Population size for DE/PSO (0 = auto: max(200, 2*n_vars)).
-
-  // Gradient descent specific
-  double step_size = 1.0;    ///< Initial step size for gradient descent (Armijo starting alpha).
-  double fd_epsilon = 1e-4;  ///< Finite difference perturbation size for gradient estimation.
-  std::string gradient_method;  ///< Gradient estimator: "finite_difference" (default), "spsa", "sensitivity".
-  std::string stochastic_optimizer;  ///< Optimizer for stochastic gradient: "sgd" (default), "momentum", "adam".
-};
+using OptimizationStepConfig = traffic_assignment::StepConfig;
 
 /**
  * @brief Result returned by a single optimization step execution.

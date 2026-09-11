@@ -9,10 +9,9 @@
 
 #include <unistd.h>
 
-#include "../include/common/TomlConfigLoader.h"
-#include "../include/tap/algorithms/route_based/RouteBasedApproach.h"
-#include "../include/tap/algorithms/tapas/TapasApproach.h"
-#include "../include/tap/core/NetworkBuilder.h"
+#include <traffic_assignment/solve.hpp>
+#include "common/RuntimeOptions.h"
+
 
 namespace fs = std::filesystem;
 
@@ -21,35 +20,6 @@ using namespace TrafficAssignment::Config;
 
 namespace {
 
-std::shared_ptr<TrafficAssignment::TrafficAssignmentApproach<long double>>
-CreateApproach(const TapConfig& config, TrafficAssignment::Network<long double>& network) {
-  const std::string approach = ToLowerCopy(config.solver.approach);
-  if (approach == "routebased" || approach == "route_based") {
-    return std::make_shared<TrafficAssignment::RouteBasedApproach<long double>>(
-      network,
-      config.solver.approach_alpha,
-      config.solver.route_based.shift_method,
-      config.solver.route_based.route_search_threads,
-      config.solver.max_standard_iterations > 0 ? config.solver.max_standard_iterations : 200,
-      config.solver.route_based.full_iteration_count > 0 ? config.solver.route_based.full_iteration_count : 3,
-      config.solver.route_based.origin_iteration_count > 0 ? config.solver.route_based.origin_iteration_count : 1,
-      config.solver.route_based.ema_alpha > 0.0L ? config.solver.route_based.ema_alpha : 0.7L
-    );
-  }
-  if (approach == "tapas" || approach == "tasktapas" || approach == "task_tapas" || approach == "task") {
-    return std::make_shared<TrafficAssignment::TapasApproach<long double>>(
-      network,
-      config.solver.approach_alpha,
-      config.solver.max_standard_iterations > 0 ? config.solver.max_standard_iterations : 200,
-      config.solver.tapas.mu > 0.0L ? config.solver.tapas.mu : 0.5L,
-      config.solver.tapas.v > 0.0L ? config.solver.tapas.v : 0.25L
-    );
-  }
-  throw std::runtime_error(
-    "Unsupported approach '" + config.solver.approach +
-    "'. Supported: RouteBased, Tapas."
-  );
-}
 
 void PrintHelp() {
   std::cout
@@ -166,13 +136,13 @@ int main(int argc, char** argv) {
     if (!quiet) {
       std::cout << "Building network from dataset '" << config.network.dataset << "'..." << std::endl;
     }
-    TrafficAssignment::NetworkBuilder builder;
-    auto network = builder.BuildFromDataset<long double>(config.network.dataset);
+    auto network = traffic_assignment::LoadNetwork(
+        config.network.dataset, (project_root / "data" / "TransportationNetworks").string());
 
     if (!quiet) {
       std::cout << "Creating approach: " << config.solver.approach << " (" << config.solver.route_based.shift_method << ")" << std::endl;
     }
-    auto approach = CreateApproach(config, network);
+    auto approach = traffic_assignment::MakeApproach(network, ToTapOptions(config.solver));
 
     // Configure output path for statistics
     const fs::path output_root = ResolvePath(fs::path(config.output_root), project_root);
@@ -181,15 +151,15 @@ int main(int argc, char** argv) {
     if (!quiet) {
       std::cout << "\nRunning Traffic Assignment...\n" << std::endl;
     }
-    approach->ComputeTrafficFlows(true);
+    const auto result = traffic_assignment::SolveTap(*approach, false, true);
 
     // Always emit structured [RESULT] line
     std::cout << "[RESULT]"
               << " approach=" << approach->GetApproachName()
               << " dataset=" << config.network.dataset
-              << " relative_gap=" << std::setprecision(15) << network.RelativeGap()
-              << " objective_function=" << network.ObjectiveFunction()
-              << " total_travel_time=" << network.TotalTravelTime()
+              << " relative_gap=" << std::setprecision(15) << result.relative_gap
+              << " objective_function=" << result.beckmann_objective
+              << " total_travel_time=" << result.total_travel_time
               << std::endl;
 
     // Print human-readable results when not quiet
@@ -198,9 +168,9 @@ int main(int argc, char** argv) {
       std::cout << "\n=== Traffic Assignment Results ===" << std::endl;
       std::cout << "  Approach:          " << approach->GetApproachName() << std::endl;
       std::cout << "  Dataset:           " << config.network.dataset << std::endl;
-      std::cout << "  RelativeGap:       " << network.RelativeGap() << std::endl;
-      std::cout << "  ObjectiveFunction: " << network.ObjectiveFunction() << std::endl;
-      std::cout << "  TotalTravelTime:   " << network.TotalTravelTime() << std::endl;
+      std::cout << "  RelativeGap:       " << result.relative_gap << std::endl;
+      std::cout << "  ObjectiveFunction: " << result.beckmann_objective << std::endl;
+      std::cout << "  TotalTravelTime:   " << result.total_travel_time << std::endl;
     }
 
     // Write link flow distribution
@@ -211,16 +181,16 @@ int main(int argc, char** argv) {
       std::ofstream flows_file(flows_path, std::ios::out);
       flows_file << "link_id,init_node,term_node,capacity,free_flow_time,flow,cost\n";
       flows_file << std::setprecision(10);
-      const auto& links = network.links();
-      for (int i = 0; i < network.number_of_links(); ++i) {
-        const auto& link = links[i];
+      for (int i = 0; i < network->number_of_links(); ++i) {
+        const auto link = network->link(i);
+        const auto data = link.data();
         flows_file << i << ","
-                   << link.init << ","
-                   << link.term << ","
-                   << link.capacity << ","
-                   << link.free_flow_time << ","
-                   << link.flow << ","
-                   << link.Delay() << "\n";
+                   << data.init << ","
+                   << data.term << ","
+                   << link.capacity() << ","
+                   << data.free_flow_time << ","
+                   << result.flows[i] << ","
+                   << result.link_costs[i] << "\n";
       }
       if (!quiet) {
         std::cout << "  Link flows:        " << flows_path.string() << std::endl;

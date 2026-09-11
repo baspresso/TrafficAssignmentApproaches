@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 
 import numpy as np
 
-from ._core import Network, RouteBasedApproach, TapasApproach, TrafficAssignmentApproach
+from ._core import Network, TapOptions, TrafficAssignmentApproach, _make_approach, _solve_tap
 from .datasets import load_network
-
-_TAPAS_NAMES = {"tapas", "task", "tasktapas"}
-_ROUTE_BASED_NAMES = {"routebased"}
 
 
 @dataclass
@@ -28,24 +24,28 @@ class TapResult:
     solve_seconds: float
 
 
-def make_approach(network: Network, approach: str = "tapas", *, alpha: float = 1e-14,
-                  max_iterations: int = 200, mu: float = 0.5, v: float = 0.25,
-                  shift_method: str = "NewtonStep", route_search_threads: int = 1,
-                  full_iteration_count: int = 3, origin_iteration_count: int = 1,
-                  ema_alpha: float = 0.7) -> TrafficAssignmentApproach:
-    """Create a TAP solver by name; defaults mirror the ``tap_solver`` executable."""
-    key = approach.lower().replace("_", "")
-    if key in _TAPAS_NAMES:
-        return TapasApproach(network, alpha, max_iterations, mu, v)
-    if key in _ROUTE_BASED_NAMES:
-        return RouteBasedApproach(network, alpha, shift_method, route_search_threads,
-                                  max_iterations, full_iteration_count,
-                                  origin_iteration_count, ema_alpha)
-    raise ValueError(f"Unsupported approach '{approach}'. Supported: Tapas, RouteBased.")
+def make_approach(network: Network, approach: str | TapOptions = "tapas", **options) -> TrafficAssignmentApproach:
+    """Create a native solver from a name or typed :class:`TapOptions`.
+
+    Legacy ``alpha=`` is accepted as an alias for ``relative_gap_tolerance=``.
+    A typed options object is copied before applying keyword overrides.
+    """
+    config = TapOptions(approach) if isinstance(approach, TapOptions) else TapOptions()
+    if not isinstance(approach, TapOptions):
+        config.approach = approach
+    if "alpha" in options:
+        if "relative_gap_tolerance" in options:
+            raise TypeError("pass either alpha or relative_gap_tolerance, not both")
+        options["relative_gap_tolerance"] = options.pop("alpha")
+    for key, value in options.items():
+        if not hasattr(config, key):
+            raise TypeError(f"Unknown TAP option '{key}'")
+        setattr(config, key, value)
+    return _make_approach(network, config)
 
 
 def solve_tap(network: Network | str,
-              approach: str | TrafficAssignmentApproach = "tapas", *,
+              approach: str | TapOptions | TrafficAssignmentApproach = "tapas", *,
               data_root=None, reset: bool = False, **approach_options) -> TapResult:
     """Solve user equilibrium and return flows plus convergence metrics.
 
@@ -53,33 +53,27 @@ def solve_tap(network: Network | str,
     ``"tapas"``, ``"routebased"``, or a pre-built approach object (in which case
     its own network is used and ``approach_options`` must be empty). With
     ``reset=True`` the network is cleared first; the default keeps existing
-    flows/routes as a warm start.
+    solver state. Reuse an approach object to warm-start TAPAS; creating a new
+    TAPAS approach starts a fresh assignment.
     """
     if isinstance(approach, TrafficAssignmentApproach):
         if approach_options:
             raise TypeError("approach_options are only valid when approach is given by name")
         approach_obj = approach
         network = approach_obj.network
-        if reset:
-            approach_obj.reset()
     else:
         if isinstance(network, str):
             network = load_network(network, data_root=data_root)
-        if reset:
-            network.reset()
         approach_obj = make_approach(network, approach, **approach_options)
 
-    start = time.perf_counter()
-    approach_obj.compute_traffic_flows()
-    solve_seconds = time.perf_counter() - start
-
+    native = _solve_tap(approach_obj, reset=reset)
     return TapResult(
-        approach=approach_obj.approach_name,
-        network_name=network.name,
-        relative_gap=network.relative_gap(),
-        total_travel_time=network.total_travel_time(),
-        beckmann_objective=network.beckmann_objective(),
-        flows=network.flows(),
-        link_costs=network.link_costs(),
-        solve_seconds=solve_seconds,
+        approach=native.approach,
+        network_name=native.network_name,
+        relative_gap=native.relative_gap,
+        total_travel_time=native.total_travel_time,
+        beckmann_objective=native.beckmann_objective,
+        flows=native.flows,
+        link_costs=native.link_costs,
+        solve_seconds=native.solve_seconds,
     )

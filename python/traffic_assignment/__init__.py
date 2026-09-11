@@ -18,6 +18,8 @@ Quick start::
 
 from ._core import (
     BilevelCND,
+    CndpOptions,
+    TapOptions,
     Link,
     LinkConstraint,
     MetricsConfig,
@@ -42,6 +44,8 @@ __version__ = "0.1.0"
 
 __all__ = [
     "BilevelCND",
+    "CndpOptions",
+    "TapOptions",
     "CndpResult",
     "Link",
     "LinkConstraint",

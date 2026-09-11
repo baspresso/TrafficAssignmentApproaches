@@ -2,6 +2,7 @@
 #define BILEVEL_CND_H
 
 #include <vector>
+#include <traffic_assignment/results.hpp>
 #include <string>
 #include <memory>
 #include <stdexcept>
@@ -142,7 +143,7 @@ public:
    * final TA equilibrium, and outputs optimality condition statistics and solution CSV.
    * On failure, records partial results before re-throwing.
    */
-  void ComputeNetworkDesign() {
+  traffic_assignment::CndpResult ComputeNetworkDesign() {
     ApplyApproachRuntimeOptions();
     PrintConfiguration();
     const auto optimization_start_time = std::chrono::steady_clock::now();
@@ -166,7 +167,7 @@ public:
       auto pipeline = OptimizationPipeline<T>::BuildFromConfigs(step_configs_);
       pipeline.Execute(ctx);
 
-      ComputeFinalResults(optimization_start_time, counters);
+      return ComputeFinalResults(optimization_start_time, counters);
     } catch (...) {  // intentional catch-all: record partial results, then rethrow unchanged
       const double failed_elapsed_seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - optimization_start_time)
@@ -257,7 +258,7 @@ private:
   }
 
   /// @brief Runs final TA solve, logs results, writes summary and solution CSV.
-  void ComputeFinalResults(
+  traffic_assignment::CndpResult ComputeFinalResults(
       std::chrono::steady_clock::time_point optimization_start_time,
       typename CndOptimizationContext<T>::RuntimeCounters& counters) {
     // Final TA computation
@@ -295,14 +296,6 @@ private:
                             budget_function,
                             final_ta_compute_seconds,
                             true);
-    // Always emit structured [RESULT] line for machine parsing
-    std::cout << "[RESULT]"
-              << " optimization_time=" << std::fixed << std::setprecision(2) << optimization_elapsed_seconds
-              << " objective_function=" << std::fixed << std::setprecision(10) << objective_function
-              << " total_travel_time=" << std::fixed << std::setprecision(10) << total_travel_time
-              << " budget_function=" << std::fixed << std::setprecision(10) << budget_function
-              << std::endl;
-
     if (verbose_) {
       std::cout << "optimization_time = "
                 << std::fixed << std::setprecision(2)
@@ -321,10 +314,25 @@ private:
       true
     );
 
+    // Snapshot the same values that were recorded above, before optional diagnostics.
+    traffic_assignment::CndpResult result;
+    result.objective = objective_function;
+    result.total_travel_time = total_travel_time;
+    result.budget = budget_function;
+    result.budget_upper_bound = budget_upper_bound_;
+    result.elapsed_seconds = optimization_elapsed_seconds;
+    for (std::size_t i = 0; i < constraints_.size(); ++i) {
+      result.capacities.push_back(network_.links()[i].capacity);
+      result.flows.push_back(network_.links()[i].flow);
+      result.lower_bounds.push_back(constraints_[i].lower_bound);
+      result.upper_bounds.push_back(constraints_[i].upper_bound);
+    }
+
     if (final_diagnostics_enabled_) {
       statistics_recorder_.WriteSolutionCSV(constraints_);
       RecordStatistics(ctx);
     }
+    return result;
   }
 
   // =====================================================================

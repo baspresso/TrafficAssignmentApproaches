@@ -9,10 +9,12 @@
 #include <toml++/toml.hpp>
 
 #include "ConfigUtils.h"
-#include "../cnd/OptimizationStep.h"
-#include "../cnd/CndStatisticsRecorder.h"
+#include <traffic_assignment/options.hpp>
 
 namespace TrafficAssignment::Config {
+
+using traffic_assignment::MetricsConfig;
+using traffic_assignment::StepConfig;
 
 namespace fs = std::filesystem;
 
@@ -64,8 +66,8 @@ struct CndpConfig {
   NetworkConfig network;
   SolverConfig solver;
   OutputConfig output;
-  CndMetricsConfig metrics;
-  std::vector<OptimizationStepConfig> pipeline;
+  MetricsConfig metrics;
+  std::vector<StepConfig> pipeline;
 };
 
 struct TapConfig {
@@ -131,7 +133,7 @@ inline void LoadOutputConfig(const toml::table& tbl, OutputConfig& out) {
   if (auto v = (*o)["quiet"].value<std::string>()) out.quiet = *v;
 }
 
-inline void LoadMetricsConfig(const toml::table& tbl, CndMetricsConfig& m) {
+inline void LoadMetricsConfig(const toml::table& tbl, MetricsConfig& m) {
   const auto* mt = tbl["metrics"].as_table();
   if (!mt) return;
 
@@ -147,8 +149,8 @@ inline void LoadMetricsConfig(const toml::table& tbl, CndMetricsConfig& m) {
   if (auto v = (*mt)["scenario_name"].value<std::string>()) m.scenario_name = *v;
 }
 
-inline OptimizationStepConfig LoadStepFromTable(const toml::table& step) {
-  OptimizationStepConfig cfg;
+inline StepConfig LoadStepFromTable(const toml::table& step) {
+  StepConfig cfg;
 
   if (auto v = step["type"].value<std::string>()) cfg.type = *v;
   if (auto v = step["name"].value<std::string>()) cfg.name = *v;
@@ -167,7 +169,7 @@ inline OptimizationStepConfig LoadStepFromTable(const toml::table& step) {
   return cfg;
 }
 
-inline void LoadPipeline(const toml::table& tbl, std::vector<OptimizationStepConfig>& pipeline) {
+inline void LoadPipeline(const toml::table& tbl, std::vector<StepConfig>& pipeline) {
   const auto* arr = tbl["pipeline"].as_array();
   if (!arr) return;
 

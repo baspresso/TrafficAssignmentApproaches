@@ -29,7 +29,13 @@ The repository includes the following classes of traffic assignment methods:
   - Data preprocessing and experiment orchestration: **Python**
 
 - **Build System**
-  CMake (>= 3.14) with Ninja, using system-installed Eigen3, NLopt, and Boost.
+  CMake (>= 3.24) with Ninja, using system-installed Eigen3, NLopt, and Boost.
+
+The shared C++ library target is `traffic_assignment::core`. Its public headers
+are in `cpp/include/traffic_assignment/`; algorithm templates are private under
+`cpp/src/detail/`. The Python extension (`cpp/bindings/`) and standalone
+applications (`cpp/apps/`) both use this compiled library. See the
+[architecture guide](docs/architecture.md) for the API, ownership model, and build options.
 
 ## Build and Run
 
@@ -40,7 +46,8 @@ sudo apt install build-essential cmake ninja-build pkg-config \
                  libeigen3-dev libnlopt-cxx-dev libboost-all-dev
 ```
 
-(`toml++` and `OptimLib` are fetched automatically by CMake `FetchContent`.)
+(`OptimLib` is fetched automatically by CMake `FetchContent`; `toml++` is fetched
+when building the standalone applications.)
 
 ### Configure
 
@@ -103,7 +110,10 @@ network = ta.network_from_arrays(
 )
 ```
 
-`solve_tap` / `solve_cndp` return result dataclasses with NumPy arrays; the
+`solve_tap` / `solve_cndp` return result dataclasses with NumPy arrays, using
+objective values and metrics computed by the native library. A self-contained
+example is available in [`examples/two_routes.py`](examples/two_routes.py).
+The typed `TapOptions` and `CndpOptions` classes expose native solver settings; the
 underlying objects (`Network`, `TapasApproach`, `RouteBasedApproach`,
 `BilevelCND`, ...) are exposed for object-level workflows. CNDP file outputs
 (trace CSV, metadata JSON, summary CSV) are off by default and enabled by

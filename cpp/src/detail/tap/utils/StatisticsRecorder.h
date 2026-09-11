@@ -4,6 +4,7 @@
 #include <chrono>
 #include <string>
 #include <fstream>
+#include <filesystem>
 #include <iomanip>
 #include <memory>
 #include "../core/Network.h"

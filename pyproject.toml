@@ -21,6 +21,7 @@ install.components = ["python"]
 
 [tool.scikit-build.cmake.define]
 BUILD_PYTHON_BINDINGS = "ON"
+BUILD_CPP_APPS = "OFF"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
