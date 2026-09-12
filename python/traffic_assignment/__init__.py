@@ -30,6 +30,7 @@ from ._core import (
     TrafficAssignmentApproach,
 )
 from .cndp import CndpResult, solve_cndp, step
+from .dataframes import constraints_from_dataframe, network_from_dataframes
 from .datasets import (
     constraints_from_arrays,
     default_constraints_path,
@@ -57,12 +58,14 @@ __all__ = [
     "TapasApproach",
     "TrafficAssignmentApproach",
     "constraints_from_arrays",
+    "constraints_from_dataframe",
     "default_constraints_path",
     "find_data_root",
     "load_constraints",
     "load_network",
     "make_approach",
     "network_from_arrays",
+    "network_from_dataframes",
     "solve_cndp",
     "solve_tap",
     "step",

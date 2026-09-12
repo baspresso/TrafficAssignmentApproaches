@@ -121,6 +121,42 @@ passing a `metrics=` config. Dataset discovery walks up from the working
 directory looking for `data/TransportationNetworks`; override with the
 `data_root=` argument or the `TRAFFIC_ASSIGNMENT_DATA` environment variable.
 
+### DataFrame inputs and notebooks
+
+Install the optional pandas adapters with `pip install -e '.[dataframes]'`, or
+install the notebook environment with `pip install -e '.[examples]'`.
+
+```python
+# links_df: per-link columns; demand_df: square matrix labelled by zone ID
+network = ta.network_from_dataframes(
+    "MyNetwork", links_df, demand_df, node_index_base=1,
+)
+result = ta.solve_tap(network)
+
+# constraints_df: link_index, lower_bound, upper_bound (one row per link)
+constraints = ta.constraints_from_dataframe(network, constraints_df, node_index_base=1)
+design = ta.solve_cndp(
+    network,
+    [ta.step("nlopt", algorithm="LN_COBYLA", max_iterations=100)],
+    constraints=constraints,
+    budget=10000.0,
+)
+```
+
+The [DataFrame input guide](docs/dataframes.md) documents columns, node and link
+indexing, validation, and CNDP capacity/budget semantics. Both Sioux Falls
+notebooks construct their input DataFrames from embedded benchmark values;
+they need no dataset files or downloads after installing the package:
+
+- [TAP with DataFrames](examples/siouxfalls_tap.ipynb): construct the network,
+  solve equilibrium, inspect flows and congestion, compare approaches, and
+  change demand.
+- [CNDP with DataFrames](examples/siouxfalls_cndp.ipynb): construct capacity
+  constraints, solve the baseline TAP and network design, check the budget and
+  bounds, and compare capacity and flow changes.
+
+Start `jupyter lab examples/` and select a kernel with the package installed.
+
 ## Layered Runtime Config (defaults → config → env → CLI)
 
 `cndp_solver` supports layered configuration:

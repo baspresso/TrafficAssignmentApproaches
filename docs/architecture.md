@@ -128,6 +128,14 @@ inside the native library.
 from `datasets.py` continue to work. The `_core.pyi` declarations describe the
 native interface for editors and type checkers.
 
+`dataframes.py` adds optional pandas adapters, exported as
+`network_from_dataframes` and `constraints_from_dataframe`. They validate numeric
+inputs, align demand axes by zone label, and align links/constraints by an explicit
+zero-based `link_index` before using the existing array/native constructors.
+pandas is imported only when an adapter is called. See the
+[DataFrame input guide](dataframes.md) for the schema and the Sioux Falls notebooks
+in `examples/` for complete workflows.
+
 ## State, precision, and scope
 
 Reuse an approach object to warm-start its internal state. A new TAPAS approach
