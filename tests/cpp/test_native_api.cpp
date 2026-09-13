@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 namespace ta = traffic_assignment;
@@ -10,7 +11,7 @@ void Require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
 
-std::shared_ptr<ta::Network> TwoRoutes() {
+ta::NetworkData TwoRoutesData() {
   ta::NetworkData data;
   data.name = "TwoRoutes";
   data.number_of_nodes = 4;
@@ -18,11 +19,80 @@ std::shared_ptr<ta::Network> TwoRoutes() {
   data.links = {{0, 1, 10, 0, 2, 1, 1}, {0, 2, 10, 0, 1, 1, 1},
                 {2, 1, 10, 0, 1, 1, 1}, {2, 3, 10, 0, 1, 0, 1}};
   data.demand = {{0, 10}, {0, 0}};
-  return std::make_shared<ta::Network>(data);
+  return data;
+}
+
+std::shared_ptr<ta::Network> TwoRoutes() {
+  return std::make_shared<ta::Network>(TwoRoutesData());
+}
+
+template <typename Function>
+void RequireInvalid(Function run, const char* message) {
+  try {
+    run();
+  } catch (const std::invalid_argument&) {
+    return;
+  }
+  throw std::runtime_error(message);
+}
+
+void CheckInputValidation() {
+  for (auto field : {&ta::LinkData::capacity, &ta::LinkData::length,
+                     &ta::LinkData::free_flow_time, &ta::LinkData::b,
+                     &ta::LinkData::power, &ta::LinkData::speed, &ta::LinkData::toll}) {
+    for (auto value : {-1.0L, std::numeric_limits<ta::Real>::quiet_NaN(),
+                      std::numeric_limits<ta::Real>::infinity()}) {
+      auto data = TwoRoutesData();
+      data.links[0].*field = value;
+      RequireInvalid([&] { ta::Network invalid(data); }, "invalid native link value accepted");
+    }
+  }
+  auto data = TwoRoutesData();
+  data.links[0].capacity = 0;
+  RequireInvalid([&] { ta::Network invalid(data); }, "zero capacity accepted");
+  data = TwoRoutesData();
+  data.links[0].term = data.number_of_nodes;
+  RequireInvalid([&] { ta::Network invalid(data); }, "out-of-range node accepted");
+  data = TwoRoutesData();
+  data.demand[0][1] = -1;
+  RequireInvalid([&] { ta::Network invalid(data); }, "negative demand accepted");
+  data.demand[0][1] = std::numeric_limits<ta::Real>::quiet_NaN();
+  RequireInvalid([&] { ta::Network invalid(data); }, "nonfinite demand accepted");
+  data = TwoRoutesData();
+  data.demand[0].pop_back();
+  RequireInvalid([&] { ta::Network invalid(data); }, "ragged demand accepted");
+
+  auto network = TwoRoutes();
+  auto capacities = network->capacities();
+  capacities[0] = 15;
+  capacities[1] = 0;
+  RequireInvalid([&] { network->set_capacities(capacities); }, "invalid capacity update accepted");
+  Require(network->capacities()[0] == 10, "failed capacity update mutated the network");
+  RequireInvalid([&] { network->link(0).set_capacity(-1); }, "invalid link capacity accepted");
+
+  std::vector<ta::LinkConstraint> constraints;
+  for (const auto& nodes : network->link_nodes()) constraints.emplace_back(nodes[0], nodes[1], 8, 20, 1);
+  auto approach = ta::MakeApproach(network);
+  ta::StepConfig step;
+  step.type = "nlopt";
+  step.algorithm = "LN_COBYLA";
+  for (auto field : {&ta::LinkConstraint::lower_bound, &ta::LinkConstraint::upper_bound,
+                     &ta::LinkConstraint::investment_cost_param}) {
+    auto invalid = constraints;
+    // The final link is insensitive: validation must precede its bound filtering.
+    invalid.back().*field = std::numeric_limits<double>::quiet_NaN();
+    RequireInvalid([&] { ta::BilevelCND solver(network, approach, invalid, {step}); },
+                   "invalid native constraints accepted");
+    Require(network->capacities()[0] == 10, "invalid constraints mutated capacities");
+  }
+  std::swap(constraints[0], constraints[1]);
+  RequireInvalid([&] { ta::BilevelCND solver(network, approach, constraints, {step}); },
+                 "misaligned native constraints accepted");
 }
 
 int main() {
   try {
+    CheckInputValidation();
     // This translation unit includes only public headers and links the core.
     auto network = TwoRoutes();
     auto approach = ta::MakeApproach(network);

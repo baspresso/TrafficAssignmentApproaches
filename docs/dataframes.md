@@ -5,6 +5,9 @@ optional dependency: array inputs, CSV loading, and the native solvers remain
 available without it. Install `'.[examples]'` to also get JupyterLab, a Python
 kernel, and plotting dependencies.
 
+The [shared input guide](inputs.md) also covers NumPy arrays, file loading,
+cross-format validation, and compatibility conventions.
+
 The two adapters are exported at the package root:
 
 ```python
@@ -31,6 +34,8 @@ not modify the input DataFrames. Later DataFrame edits do not update a built
 network; construct another network for another scenario. Solving updates the
 native network's state, and CNDP changes its capacities. Returned result arrays
 are independent snapshots in native link order.
+Array and DataFrame adapters share numerical validation and construction;
+DataFrames additionally provide label alignment and row-specific errors.
 
 ## Links
 

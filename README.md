@@ -85,19 +85,26 @@ pip install -e .            # builds the native extension via scikit-build-core
 pip install -e .[test]      # with pytest, then run: pytest tests/
 ```
 
-Solve TAP and CNDP directly from Python:
+Prepare a network, then pass it to TAP or CNDP. DataFrame adapters are the main
+workflow for tabular inputs; arrays and explicit dataset loaders are also
+supported. See [Providing solver inputs](docs/inputs.md) for their shared contract.
+
+For a benchmark dataset:
 
 ```python
 import traffic_assignment as ta
 
-# User equilibrium (TAP); dataset resolved from data/TransportationNetworks
-result = ta.solve_tap("SiouxFalls", approach="tapas")
+# User equilibrium (TAP); load from data/TransportationNetworks
+network = ta.load_network("SiouxFalls")
+result = ta.solve_tap(network, approach="tapas")
 print(result.relative_gap, result.total_travel_time, result.flows)
 
 # Bilevel CNDP with a pipeline of optimization steps
+constraints = ta.load_constraints(ta.default_constraints_path("SiouxFalls"))
 design = ta.solve_cndp(
-    "SiouxFalls",
+    network,
     [ta.step("nlopt", algorithm="LN_COBYLA", max_iterations=100)],
+    constraints=constraints,
     budget=10000.0,
 )
 print(design.objective, design.capacities)
@@ -120,6 +127,8 @@ underlying objects (`Network`, `TapasApproach`, `RouteBasedApproach`,
 passing a `metrics=` config. Dataset discovery walks up from the working
 directory looking for `data/TransportationNetworks`; override with the
 `data_root=` argument or the `TRAFFIC_ASSIGNMENT_DATA` environment variable.
+Dataset-name and constraint-path shortcuts in solver calls remain available
+for compatibility. Explicit loaders make the chosen inputs visible before solving.
 
 ### DataFrame inputs and notebooks
 

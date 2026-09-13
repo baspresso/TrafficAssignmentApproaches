@@ -1,15 +1,13 @@
-"""Dataset loading and programmatic network construction."""
+"""Dataset discovery and compatibility resolution for solver shortcuts."""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
-import numpy as np
-
 from . import _core
-from .io import load_constraints, network_from_arrays
-from ._core import LinkConstraint, Network
+from .io import constraints_from_arrays, load_constraints, network_from_arrays
+from ._core import Network
 
 DATA_ROOT_ENV = "TRAFFIC_ASSIGNMENT_DATA"
 
@@ -50,18 +48,20 @@ def default_constraints_path(dataset: str, data_root: str | os.PathLike | None =
     return root / dataset / f"{dataset}_constraints.csv"
 
 
-def constraints_from_arrays(network: Network, lower, upper,
-                            investment_cost=1.0) -> list[LinkConstraint]:
-    """Build per-link constraints from arrays (or scalars broadcast to all links)."""
-    n_links = network.number_of_links
-    lower = np.broadcast_to(np.asarray(lower, dtype=float), (n_links,))
-    upper = np.broadcast_to(np.asarray(upper, dtype=float), (n_links,))
-    cost = np.broadcast_to(np.asarray(investment_cost, dtype=float), (n_links,))
-    if np.any(lower > upper):
-        raise ValueError("lower bound exceeds upper bound for some links")
-    nodes = network.link_nodes()
-    return [
-        LinkConstraint(int(nodes[i, 0]), int(nodes[i, 1]),
-                       float(lower[i]), float(upper[i]), float(cost[i]))
-        for i in range(n_links)
-    ]
+def _resolve_network(network, data_root=None) -> Network:
+    if isinstance(network, str):
+        network = load_network(network, data_root=data_root)
+    if not isinstance(network, Network):
+        raise TypeError("network must be a Network or a dataset name")
+    return network
+
+
+def _resolve_constraints(network: Network, constraints, data_root=None):
+    if constraints is None:
+        constraints = default_constraints_path(network.name, data_root=data_root)
+    if isinstance(constraints, (str, os.PathLike)):
+        path = Path(constraints)
+        if not path.is_file():
+            raise FileNotFoundError(f"Constraints file does not exist: {path}")
+        constraints = load_constraints(path)
+    return constraints

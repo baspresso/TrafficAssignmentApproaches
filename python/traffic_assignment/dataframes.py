@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from numbers import Integral
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from ._core import LinkConstraint, Network
-from .io import network_from_arrays
+from .io import constraints_from_arrays, network_from_arrays
+from . import _validation as validate
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -35,12 +35,7 @@ def _check_frame(frame, name: str, required=()):
 
 
 def _reject(series, invalid, label: str, requirement: str):
-    positions = np.flatnonzero(invalid)
-    if positions.size:
-        row = series.index[positions[0]]
-        if isinstance(row, np.generic):
-            row = row.item()
-        raise ValueError(f"{label} must {requirement}; invalid value at row {row!r}")
+    validate.reject(invalid, label, requirement, rows=series.index)
 
 
 def _numeric(series, label: str) -> np.ndarray:
@@ -49,30 +44,21 @@ def _numeric(series, label: str) -> np.ndarray:
             or types.is_bool_dtype(series.dtype)
             or types.is_complex_dtype(series.dtype)):
         raise ValueError(f"{label} must have a real numeric dtype")
-    values = series.to_numpy(dtype=np.float64, na_value=np.nan)
-    _reject(series, ~np.isfinite(values), label, "contain only finite, non-missing values")
-    return values
+    return validate.numeric(series.to_numpy(dtype=np.float64, na_value=np.nan),
+                            label, rows=series.index)
 
 
 def _integers(series, label: str, minimum: int = 0) -> np.ndarray:
-    values = _numeric(series, label)
-    _reject(series, values != np.floor(values), label, "contain integer values")
-    _reject(series, (values < minimum) | (values > np.iinfo(np.int32).max),
-            label, f"contain integers in [{minimum}, {np.iinfo(np.int32).max}]")
-    return values.astype(np.int64)
+    return validate.integers(_numeric(series, label), label, minimum, rows=series.index)
 
 
 def _nonnegative(series, label: str, *, positive: bool = False) -> np.ndarray:
-    values = _numeric(series, label)
-    _reject(series, values <= 0 if positive else values < 0, label,
-            "be strictly positive" if positive else "be nonnegative")
-    return values
+    return validate.nonnegative(_numeric(series, label), label,
+                                positive=positive, rows=series.index)
 
 
 def _index_base(value: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, Integral) or value not in (0, 1):
-        raise ValueError("node_index_base must be 0 or 1")
-    return int(value)
+    return validate.index_base(value)
 
 
 def _ordered_by_link_index(frame, n_links: int, name: str):
@@ -140,9 +126,7 @@ def network_from_dataframes(name: str, links: pd.DataFrame, demand: pd.DataFrame
     term = _integers(links["term_node"], "links.term_node", minimum=base) - base
     if n_nodes is None:
         n_nodes = max(zones, int(max(init.max(), term.max())) + 1) if len(links) else zones
-    if (isinstance(n_nodes, bool) or not isinstance(n_nodes, Integral)
-            or not zones <= n_nodes <= np.iinfo(np.int32).max):
-        raise ValueError("n_nodes must be an integer with n_zones <= n_nodes <= 2147483647")
+    n_nodes = validate.integer_scalar(n_nodes, "n_nodes", minimum=zones)
     for column, values in (("init_node", init), ("term_node", term)):
         _reject(links[column], values >= n_nodes, f"links.{column}",
                 f"contain node IDs below {n_nodes + base}")
@@ -201,7 +185,4 @@ def constraints_from_dataframe(network: Network, constraints: pd.DataFrame, *,
         _nonnegative(constraints["investment_cost_param"], "constraints.investment_cost_param")
         if "investment_cost_param" in constraints.columns else np.ones(len(constraints))
     )
-    return [
-        LinkConstraint(int(init), int(term), float(lb), float(ub), float(cost))
-        for (init, term), lb, ub, cost in zip(nodes, lower, upper, costs)
-    ]
+    return constraints_from_arrays(network, lower, upper, costs)

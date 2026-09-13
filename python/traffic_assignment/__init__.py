@@ -8,10 +8,13 @@ Quick start::
 
     import traffic_assignment as ta
 
-    result = ta.solve_tap("SiouxFalls")
+    network = ta.load_network("SiouxFalls")
+    result = ta.solve_tap(network)
+    constraints = ta.load_constraints(ta.default_constraints_path("SiouxFalls"))
     design = ta.solve_cndp(
-        "SiouxFalls",
+        network,
         [ta.step("nlopt", algorithm="LN_COBYLA", max_iterations=100)],
+        constraints=constraints,
         budget=10000.0,
     )
 """
@@ -32,13 +35,11 @@ from ._core import (
 from .cndp import CndpResult, solve_cndp, step
 from .dataframes import constraints_from_dataframe, network_from_dataframes
 from .datasets import (
-    constraints_from_arrays,
     default_constraints_path,
     find_data_root,
-    load_constraints,
     load_network,
-    network_from_arrays,
 )
+from .io import constraints_from_arrays, load_constraints, network_from_arrays
 from .tap import TapResult, make_approach, solve_tap
 
 __version__ = "0.1.0"

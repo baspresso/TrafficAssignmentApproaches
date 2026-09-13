@@ -1,4 +1,5 @@
 #include "bindings.hpp"
+#include <limits>
 
 namespace {
 std::shared_ptr<Network> BuildNetworkFromArrays(
@@ -18,6 +19,10 @@ std::shared_ptr<Network> BuildNetworkFromArrays(
                                   " must have one entry per link");
     }
   };
+  for (const auto* values : {&capacity, &length, &free_flow_time, &b, &power, &speed, &toll}) {
+    if (values->ndim() != 1) throw std::invalid_argument("per-link arrays must be one-dimensional");
+  }
+  if (link_type.ndim() != 1) throw std::invalid_argument("link_type must be one-dimensional");
   check_length(term.shape(0), "term_node");
   check_length(capacity.shape(0), "capacity");
   check_length(length.shape(0), "length");
@@ -52,6 +57,9 @@ std::shared_ptr<Network> BuildNetworkFromArrays(
     if (init(i) < 0 || init(i) >= n_nodes || term(i) < 0 || term(i) >= n_nodes) {
       throw std::invalid_argument("link " + std::to_string(i) +
                                   " has a node id outside [0, n_nodes)");
+    }
+    if (type_view(i) < 0 || type_view(i) > std::numeric_limits<int>::max()) {
+      throw std::invalid_argument("link_type must be an integer in [0, 2147483647]");
     }
     links.push_back(LinkData{static_cast<int>(init(i)), static_cast<int>(term(i)),
                        static_cast<Real>(cap(i)), static_cast<Real>(len(i)),
@@ -138,6 +146,7 @@ void BindNetwork(py::module_& m) {
   m.def("_build_network_from_dataset", &LoadNetwork, py::arg("dataset"), py::arg("data_root"),
         py::call_guard<py::gil_scoped_release>());
   m.def("_load_constraints", &LoadConstraints, py::arg("path"), py::arg("verbose") = false,
+        py::arg("node_index_base") = 1,
         py::call_guard<py::gil_scoped_release>());
   m.def("_build_network_from_arrays", &BuildNetworkFromArrays, py::arg("name"),
         py::arg("n_nodes"), py::arg("n_zones"), py::arg("init_node"),

@@ -1,186 +1,153 @@
-// include/traffic_assignment/core/NetworkBuilder.h
-#ifndef NETWORK_BUILDER_H
-#define NETWORK_BUILDER_H
+#pragma once
 
-#include "Network.h"
+#include <traffic_assignment/network.hpp>
+
 #include <filesystem>
-#include <vector>
 #include <fstream>
-#include <sstream>
-#include <iostream>
+#include <map>
+#include <tuple>
+#include <vector>
+
+#include "../data/Link.h"
+#include "../../csv.hpp"
 
 namespace TrafficAssignment {
-
-// Scoped to the project namespace (matching ConfigUtils.h / TomlConfigLoader.h)
-// instead of leaking a global `fs` into every translation unit that includes
-// this header.
 namespace fs = std::filesystem;
 
-/**
- * @brief Loads transportation network data from TNTP-format CSV files.
- *
- * Reads network topology (*_net.csv) and trip demand matrices (*_trips.csv)
- * from the data/TransportationNetworks/{dataset}/ directory and constructs
- * a fully initialized Network object with adjacency lists.
- */
+/// Parses preprocessed CSV files into values for the public Network constructor.
 class NetworkBuilder {
-public:
-    NetworkBuilder() = default;
+ public:
+  static constexpr const char* kDefaultDataRoot = "data/TransportationNetworks";
 
-    /// @brief Default dataset root, relative to the working directory (CLI behavior).
-    static constexpr const char* kDefaultDataRoot = "data/TransportationNetworks";
+  std::tuple<int, int, std::vector<traffic_assignment::LinkData>> LoadNetworkData(
+      const std::string& dataset, const fs::path& root = kDefaultDataRoot) const {
+    namespace csv = traffic_assignment::detail::csv;
+    const auto path = root / dataset / (dataset + "_net.csv");
+    std::ifstream file(path);
+    if (!file) throw std::runtime_error("Cannot open network file: " + path.string());
+    std::size_t line_number = 1;
+    try {
+      std::string line;
+      if (!std::getline(file, line)) throw std::invalid_argument("missing network metadata");
+      const auto metadata = ParseMetadata(line);
+      const int zones = RequiredMetadata(metadata, "NUMBER OF ZONES");
+      const int nodes = RequiredMetadata(metadata, "NUMBER OF NODES");
+      const int count = RequiredMetadata(metadata, "NUMBER OF LINKS");
+      if (zones <= 0 || nodes < zones) throw std::invalid_argument("need 0 < n_zones <= n_nodes");
 
-    /// @brief Loads and builds a complete Network from a named TNTP dataset.
-    /// @param data_root Directory containing per-dataset subdirectories.
-    template <typename T>
-    Network<T> BuildFromDataset(const std::string& dataset_name,
-                                const fs::path& data_root = kDefaultDataRoot) {
-        std::string name = dataset_name;
-        auto [nodes, zones, links] = LoadNetworkData<T>(dataset_name, data_root);
-        auto trips = LoadTripData<T>(dataset_name, zones, data_root);
-        auto [adjacency, reverse_adjacency] = BuildAdjacencyLists<T>(links, nodes);
-
-        return Network<T>(name, nodes, zones,
-            links, trips,
-            adjacency, reverse_adjacency
-        );
-    }
-
-    /// @brief Parses network metadata and link data from the *_net.csv file.
-    template <typename T>
-    std::tuple<int, int, std::vector<Link<T>>>
-    LoadNetworkData(const std::string& dataset_name,
-                    const fs::path& data_root = kDefaultDataRoot) {
-        // Path construction
-        fs::path net_path = GetDatasetPath(dataset_name, data_root) / (dataset_name + "_net.csv");
-        std::ifstream net_file(net_path);
-        
-        if(!net_file.is_open()) {
-            throw std::runtime_error("Cannot open network file: " + net_path.string());
+      ++line_number;
+      if (!std::getline(file, line)) throw std::invalid_argument("missing network header");
+      const auto header = csv::Split(line);
+      std::map<std::string, std::size_t> columns;
+      for (std::size_t i = 0; i < header.size(); ++i) {
+        if (header[i].empty() || !columns.emplace(header[i], i).second) {
+          throw std::invalid_argument("network columns must have unique, nonempty names");
         }
+      }
+      for (const auto* field : {"init_node", "term_node", "capacity", "free_flow_time", "b", "power"}) {
+        if (!columns.contains(field)) throw std::invalid_argument(std::string("missing required column: ") + field);
+      }
+      std::vector<traffic_assignment::LinkData> links;
+      std::vector<int> indices;
+      while (std::getline(file, line)) {
+        ++line_number;
+        line = csv::Trim(line);
+        if (line.empty() || line.front() == '#') continue;
+        const auto fields = csv::Split(line);
+        if (fields.size() != header.size()) throw std::invalid_argument("network row must have one field per header column");
+        auto number = [&](const char* field, double fallback = 0) {
+          const auto found = columns.find(field);
+          return found == columns.end() ? fallback : csv::Number(fields[found->second], field);
+        };
+        auto integer = [&](const char* field, int fallback, int minimum = 0) {
+          const auto found = columns.find(field);
+          return found == columns.end() ? fallback : csv::Integer(fields[found->second], field, minimum);
+        };
+        links.push_back({integer("init_node", 0, 1) - 1, integer("term_node", 0, 1) - 1,
+                         number("capacity"), number("length"), number("free_flow_time"),
+                         number("b"), number("power"), number("speed"), number("toll"),
+                         integer("link_type", 1)});
+        if (columns.contains("link_index")) indices.push_back(integer("link_index", 0));
+      }
+      if (links.size() != static_cast<std::size_t>(count)) {
+        throw std::invalid_argument("network row count must match NUMBER OF LINKS");
+      }
+      if (columns.contains("link_index")) links = csv::OrderByLinkIndex(std::move(links), indices);
+      return {nodes, zones, std::move(links)};
+    } catch (const std::exception& error) {
+      throw std::runtime_error(path.string() + ": line " + std::to_string(line_number) + ": " + error.what());
+    }
+  }
 
-        // Read metadata
-        int nodes = 0, zones = 0, link_count = 0;
-        std::string line;
-        std::getline(net_file, line);
-        ParseNetworkMetadata(line, nodes, zones, link_count);
-        // Skip line
-        std::getline(net_file, line);
-        // Read links
-        std::vector<Link<T>> links;
-        links.reserve(link_count);
-        
-        while(std::getline(net_file, line)) {
-            links.push_back(ParseLinkLine<T>(line));
+  template <typename T>
+  std::vector<std::vector<T>> LoadTripData(const std::string& dataset, int zones,
+                                         const fs::path& root = kDefaultDataRoot) const {
+    namespace csv = traffic_assignment::detail::csv;
+    const auto path = root / dataset / (dataset + "_trips.csv");
+    std::ifstream file(path);
+    if (!file) throw std::runtime_error("Cannot open trip file: " + path.string());
+    std::size_t line_number = 1;
+    try {
+      std::string line;
+      if (!std::getline(file, line)) throw std::invalid_argument("missing demand metadata");
+      const auto metadata = ParseMetadata(line);
+      if (zones <= 0 || RequiredMetadata(metadata, "NUMBER OF ZONES") != zones) {
+        throw std::invalid_argument("demand NUMBER OF ZONES must match the network");
+      }
+      std::vector<std::vector<T>> trips;
+      while (std::getline(file, line)) {
+        ++line_number;
+        line = csv::Trim(line);
+        if (line.empty() || line.front() == '#') continue;
+        const auto fields = csv::Split(line);
+        if (fields.size() != static_cast<std::size_t>(zones)) {
+          throw std::invalid_argument("demand must have one column per zone");
         }
-
-        return {nodes, zones, links};
+        std::vector<T> row;
+        row.reserve(fields.size());
+        for (const auto& field : fields) row.push_back(static_cast<T>(csv::Number(field, "demand")));
+        trips.push_back(std::move(row));
+      }
+      if (trips.size() != static_cast<std::size_t>(zones)) {
+        throw std::invalid_argument("demand must have one row per zone");
+      }
+      return trips;
+    } catch (const std::exception& error) {
+      throw std::runtime_error(path.string() + ": line " + std::to_string(line_number) + ": " + error.what());
     }
+  }
 
-    /// @brief Reads the OD demand matrix from the *_trips.csv file.
-    template <typename T>
-    std::vector<std::vector<T>> LoadTripData(const std::string& dataset_name, int zones,
-                                             const fs::path& data_root = kDefaultDataRoot) {
-        fs::path trip_path = GetDatasetPath(dataset_name, data_root) / (dataset_name + "_trips.csv");
-        std::ifstream trip_file(trip_path);
-        
-        if(!trip_file.is_open()) {
-            throw std::runtime_error("Cannot open trip file: " + trip_path.string());
-        }
-
-        std::vector<std::vector<T>> trips(zones, std::vector<T>(zones, 0));
-        std::string line;
-        
-        // Skip metadata line
-        std::getline(trip_file, line);
-        
-        for(int origin = 0; origin < zones; ++origin) {
-            std::getline(trip_file, line);
-            std::stringstream ss(line);
-            std::string value;
-            
-            for(int dest = 0; dest < zones; ++dest) {
-                std::getline(ss, value, ',');
-                trips[origin][dest] = ConvertValue<T>(value);
-            }
-        }
-
-        return trips;
+  template <typename T>
+  std::pair<std::vector<std::vector<int>>, std::vector<std::vector<int>>> BuildAdjacencyLists(
+      const std::vector<Link<T>>& links, int node_count) const {
+    std::vector<std::vector<int>> adjacency(node_count), reverse(node_count);
+    for (std::size_t i = 0; i < links.size(); ++i) {
+      adjacency[links[i].init].push_back(static_cast<int>(i));
+      reverse[links[i].term].push_back(static_cast<int>(i));
     }
+    return {std::move(adjacency), std::move(reverse)};
+  }
 
-    /// @brief Builds forward and reverse adjacency lists from the link vector.
-    template <typename T>
-    std::pair<std::vector<std::vector<int>>, std::vector<std::vector<int>>>
-    BuildAdjacencyLists(const std::vector<Link<T>>& links, int node_count) {
-        std::vector<std::vector<int>> adjacency(node_count);
-        std::vector<std::vector<int>> reverse_adjacency(node_count);
-
-        for(std::size_t i = 0; i < links.size(); ++i) {
-            const auto& link = links[i];
-            adjacency[link.init].push_back(static_cast<int>(i));
-            reverse_adjacency[link.term].push_back(static_cast<int>(i));
-        }
-
-        return {adjacency, reverse_adjacency};
+ private:
+  static std::map<std::string, int> ParseMetadata(const std::string& line) {
+    namespace csv = traffic_assignment::detail::csv;
+    const auto text = csv::Trim(line);
+    if (text.empty() || text.front() != '#') throw std::invalid_argument("metadata must start with #");
+    std::map<std::string, int> result;
+    for (const auto& item : csv::Split(text.substr(1))) {
+      const auto fields = csv::Split(item, ':');
+      if (fields.size() != 2 || !result.emplace(fields[0], csv::Integer(fields[1], fields[0])).second) {
+        throw std::invalid_argument("invalid or duplicate metadata field");
+      }
     }
+    return result;
+  }
 
-private:
-    // Helper methods
-    fs::path GetDatasetPath(const std::string& dataset_name, const fs::path& data_root) {
-        return data_root / dataset_name;
-    }
-
-    void ParseNetworkMetadata(const std::string& line, int& nodes, int& zones, int& links) {
-        std::stringstream ss(line.substr(1)); // Skip '#'
-        std::string token;
-        
-        std::getline(ss, token, ':'); // "NUMBER OF ZONES"
-        ss >> zones;
-        ss.ignore(2); // Skip ", "
-        
-        std::getline(ss, token, ':'); // "NUMBER OF NODES"
-        ss >> nodes;
-        ss.ignore(2);
-        
-        std::getline(ss, token, ':'); // "NUMBER OF LINKS"
-        ss >> links;
-    }
-
-    template <typename T>
-    Link<T> ParseLinkLine(const std::string& line) {
-        std::stringstream ss(line);
-        std::string token;
-        int init, term, type;
-        T capacity, length, free_flow_time, b, power, speed, toll;
-        // Input files use 1-based indexing, convert to 0-based
-        std::getline(ss, token, ','); init = std::stoi(token) - 1;
-        std::getline(ss, token, ','); term = std::stoi(token) - 1;
-        std::getline(ss, token, ','); capacity = std::stod(token);
-        std::getline(ss, token, ','); length = std::stod(token);
-        std::getline(ss, token, ','); free_flow_time = std::stod(token);
-        std::getline(ss, token, ','); b = std::stod(token);
-        std::getline(ss, token, ','); power = std::stod(token);
-        std::getline(ss, token, ','); speed = std::stod(token);
-        std::getline(ss, token, ','); toll = std::stod(token);
-        std::getline(ss, token); type = std::stoi(token);
-
-
-        return Link<T>(
-            init, term, capacity, length, free_flow_time,
-            b, power, speed, toll, type
-        );
-    }
-
-    template <typename T>
-    T ConvertValue(const std::string& str) {
-        if constexpr (std::is_floating_point_v<T>) {
-            return std::stod(str);
-        } else {
-            return static_cast<T>(std::stoll(str));
-        }
-    }
+  static int RequiredMetadata(const std::map<std::string, int>& metadata, const std::string& key) {
+    const auto found = metadata.find(key);
+    if (found == metadata.end()) throw std::invalid_argument("missing metadata: " + key);
+    return found->second;
+  }
 };
 
-} // namespace TrafficAssignment
-
-#endif // NETWORK_BUILDER_H
+}  // namespace TrafficAssignment

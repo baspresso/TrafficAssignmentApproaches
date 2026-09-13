@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "detail/access.hpp"
+#include "detail/input_validation.hpp"
 #include "detail/cnd/BilevelCND.h"
 
 namespace traffic_assignment {
@@ -29,6 +30,16 @@ BilevelCND::BilevelCND(std::shared_ptr<Network> network,
   }
   if (constraints.size() != static_cast<std::size_t>(network->number_of_links())) {
     throw std::invalid_argument("constraints must have one entry per link");
+  }
+  const auto nodes = network->link_nodes();
+  for (std::size_t i = 0; i < constraints.size(); ++i) {
+    const auto& constraint = constraints[i];
+    const auto field = "constraint[" + std::to_string(i) + "]";
+    detail::ValidateConstraint(constraint, field);
+    if (constraint.init_node != static_cast<std::size_t>(nodes[i][0]) ||
+        constraint.term_node != static_cast<std::size_t>(nodes[i][1])) {
+      throw std::invalid_argument(field + " endpoints must match the network link in native order");
+    }
   }
   // Own the prepared constraints: callers' inputs are never modified.
   auto prepared = constraints;

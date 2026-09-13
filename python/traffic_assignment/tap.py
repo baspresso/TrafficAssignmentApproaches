@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ._core import Network, TapOptions, TrafficAssignmentApproach, _make_approach, _solve_tap
-from .datasets import load_network
+from .datasets import _resolve_network
 
 
 @dataclass
@@ -50,8 +50,8 @@ def solve_tap(network: Network | str,
     """Solve user equilibrium and return flows plus convergence metrics.
 
     ``network`` is a :class:`Network` or a TNTP dataset name. ``approach`` is
-    ``"tapas"``, ``"routebased"``, or a pre-built approach object (in which case
-    its own network is used and ``approach_options`` must be empty). With
+    ``"tapas"``, ``"routebased"``, or a pre-built approach object belonging to
+    the supplied network (``approach_options`` must then be empty). With
     ``reset=True`` the network is cleared first; the default keeps existing
     solver state. Reuse an approach object to warm-start TAPAS; creating a new
     TAPAS approach starts a fresh assignment.
@@ -60,10 +60,16 @@ def solve_tap(network: Network | str,
         if approach_options:
             raise TypeError("approach_options are only valid when approach is given by name")
         approach_obj = approach
+        if isinstance(network, Network) and network is not approach_obj.network:
+            raise ValueError("approach must belong to the supplied network")
+        if isinstance(network, str):
+            if network != approach_obj.network.name:
+                raise ValueError("dataset name must match the supplied approach's network")
+        elif not isinstance(network, Network):
+            raise TypeError("network must be a Network or a dataset name")
         network = approach_obj.network
     else:
-        if isinstance(network, str):
-            network = load_network(network, data_root=data_root)
+        network = _resolve_network(network, data_root=data_root)
         approach_obj = make_approach(network, approach, **approach_options)
 
     native = _solve_tap(approach_obj, reset=reset)

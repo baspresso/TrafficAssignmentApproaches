@@ -214,7 +214,7 @@ int main(int argc, char** argv) {
     auto approach = traffic_assignment::MakeApproach(network, ToTapOptions(config.solver));
 
     const auto constraints = traffic_assignment::LoadConstraints(
-        constraints_path.string(), config.output.verbose && !quiet);
+        constraints_path.string(), config.output.verbose && !quiet, /*node_index_base=*/1);
 
     if (config.pipeline.empty()) {
       throw std::runtime_error(

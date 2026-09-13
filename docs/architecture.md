@@ -117,16 +117,19 @@ and has file output disabled by default, including for the original positional
 constructor. Use the existing output setters or `CndpOptions` to enable output.
 The old positional constructor accepts already prepared constraints; the typed
 constructor and high-level function default to native insensitive-link filtering.
-CNDP rejects an approach belonging to a different network.
+Both TAP and CNDP reject an approach belonging to a different supplied network.
 
 The Python CNDP wrapper no longer filters links or recomputes the budget and
 objective. It packages values returned from the native final evaluation,
 including the bounds after filtering. Caller-provided constraints are copied
 inside the native library.
 
-`io.py` handles array conversion and constraint-file loading. Previous imports
-from `datasets.py` continue to work. The `_core.pyi` declarations describe the
-native interface for editors and type checkers.
+`io.py` owns network/constraint array conversion and constraint-file loading.
+`datasets.py` owns dataset discovery and private compatibility helpers for
+dataset-name and file-path solver shortcuts. Previous imports from `datasets.py`
+continue to work. `_validation.py` contains numerical checks shared by the
+Python adapters, with no pandas dependency. The `_core.pyi` declarations describe
+the native interface for editors and type checkers.
 
 `dataframes.py` adds optional pandas adapters, exported as
 `network_from_dataframes` and `constraints_from_dataframe`. They validate numeric
@@ -135,6 +138,21 @@ zero-based `link_index` before using the existing array/native constructors.
 pandas is imported only when an adapter is called. See the
 [DataFrame input guide](dataframes.md) for the schema and the Sioux Falls notebooks
 in `examples/` for complete workflows.
+
+Dataset CSV loading and array bindings both construct the public C++
+`NetworkData` and use `Network`'s validated constructor. CSV readers parse values
+and check declared dimensions; they do not construct a separate unchecked graph.
+Native checks enforce finite values, valid domains and endpoint ranges before
+building adjacency. CNDP validates original constraints before bound filtering
+and capacity mutation. The shared native validation helpers live in
+`detail/input_validation.hpp`; strict numeric CSV parsing and link-index
+ordering live in `detail/csv.hpp`.
+
+Constraint CSV endpoints are normalized from the explicitly chosen base (one by
+default) into zero-based native IDs. Optional `link_index` columns order network
+and constraint records, with duplicate/missing indices rejected. Without a key,
+records retain row order and CNDP checks endpoint consistency. See
+[Providing solver inputs](inputs.md) for schemas and migration details.
 
 ## State, precision, and scope
 

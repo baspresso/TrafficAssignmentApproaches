@@ -96,3 +96,4 @@ def test_io_compatibility_imports():
 
     assert datasets.network_from_arrays is io.network_from_arrays
     assert datasets.load_constraints is io.load_constraints
+    assert datasets.constraints_from_arrays is io.constraints_from_arrays

@@ -44,11 +44,11 @@ struct MetricsConfig {
 };
 
 struct LinkConstraint {
-  std::size_t init_node;               // Origin node
-  std::size_t term_node;               // Destination node
+  std::size_t init_node;               // Zero-based origin node
+  std::size_t term_node;               // Zero-based destination node
   double lower_bound;                  // Minimum capacity
   double upper_bound;                  // Maximum capacity
-  double investment_cost_param;        // Cost per unit capacity
+  double investment_cost_param;        // Nonnegative metadata; solver uses uniform theta
 
   LinkConstraint() = default;
 

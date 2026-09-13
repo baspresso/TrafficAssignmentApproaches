@@ -87,7 +87,12 @@ class Network {
 /// Load the project's preprocessed *_net.csv and *_trips.csv files.
 std::shared_ptr<Network> LoadNetwork(const std::string& dataset,
                                      const std::string& data_root);
+/// Read constraints into native link order with zero-based endpoints.
+/// CSV endpoints use node_index_base (one by default). Optional link_index must
+/// be a permutation of 0..n_links-1; otherwise row order is retained.
+/// Malformed rows throw. CNDP checks endpoint alignment against its network.
 std::vector<LinkConstraint> LoadConstraints(const std::string& path,
-                                            bool verbose = false);
+                                            bool verbose = false,
+                                            int node_index_base = 1);
 
 }  // namespace traffic_assignment

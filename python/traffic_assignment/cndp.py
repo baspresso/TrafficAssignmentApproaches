@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 
@@ -16,7 +15,7 @@ from ._core import (
     TapOptions,
     TrafficAssignmentApproach,
 )
-from .datasets import default_constraints_path, load_constraints, load_network
+from .datasets import _resolve_constraints, _resolve_network
 from .tap import make_approach
 
 
@@ -98,16 +97,8 @@ def solve_cndp(network: Network | str, pipeline, constraints=None, *,
     if not steps:
         raise ValueError("pipeline must contain at least one step")
 
-    if isinstance(network, str):
-        network = load_network(network, data_root=data_root)
-
-    if constraints is None:
-        constraints = default_constraints_path(network.name, data_root=data_root)
-    if isinstance(constraints, (str, Path)):
-        constraints_path = Path(constraints)
-        if not constraints_path.is_file():
-            raise FileNotFoundError(f"Constraints file does not exist: {constraints_path}")
-        constraints = load_constraints(constraints_path)
+    network = _resolve_network(network, data_root=data_root)
+    constraints = _resolve_constraints(network, constraints, data_root=data_root)
     if isinstance(approach, TrafficAssignmentApproach):
         if approach_options:
             raise TypeError("approach_options are only valid when approach is given by name")
