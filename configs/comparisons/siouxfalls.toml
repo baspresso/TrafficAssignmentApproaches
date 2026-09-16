@@ -7,7 +7,7 @@ etalon_time_limit = 7200
 dataset = "SiouxFalls"
 
 [defaults.solver]
-approach = "Tapas"
+approach = "TAPAS"
 approach_alpha = 1e-14
 budget_function_multiplier = 5.0
 budget_upper_bound = 100_000.0

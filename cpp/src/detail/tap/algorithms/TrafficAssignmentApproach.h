@@ -1,6 +1,7 @@
 #ifndef TRAFFIC_ASSIGNMENT_APPROACH_H
 #define TRAFFIC_ASSIGNMENT_APPROACH_H
 
+#include <algorithm>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -47,6 +48,18 @@ namespace TrafficAssignment {
 
     virtual std::size_t GetRouteSearchThreadCount() const {
       return 1;
+    }
+
+    /// @brief Returns positive-flow route counts in network OD-pair order.
+    virtual std::vector<std::size_t> GetRouteCountsForStatistics() const {
+      std::vector<std::size_t> counts;
+      counts.reserve(network_.number_of_od_pairs());
+      for (const auto& od_pair : network_.od_pairs()) {
+        const auto flows = od_pair.GetRoutesFlow();
+        counts.push_back(std::count_if(flows.begin(), flows.end(),
+                                      [](T flow) { return flow > T(0); }));
+      }
+      return counts;
     }
 
     /// @brief Ensures routes are available for sensitivity-based gradient computation.

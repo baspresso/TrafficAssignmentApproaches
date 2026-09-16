@@ -12,6 +12,7 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include "../tap/core/Network.h"
@@ -86,10 +87,11 @@ struct CndRunSummary {
 /**
  * @brief Records convergence traces, metadata, and summary statistics for bilevel CNDP experiments.
  *
- * Outputs three file types per run:
+ * Outputs four file types per run:
  * - Trace CSV: per-iteration objective, budget, RGAP, timing (for convergence plots)
  * - Metadata JSON: algorithm configuration and problem parameters
  * - Summary CSV: one-line append-only record per run (for comparison tables)
+ * - Route-count CSV: final per-OD route counts, separated by semicolons
  *
  * The summary CSV includes a Scenario column for grouping multiple runs in analysis.
  *
@@ -127,6 +129,8 @@ public:
       output_dir_ / ("BilevelCND_" + approach_name + "_" + run_id_ + "_quality_time.csv");
     metadata_file_path_ =
       output_dir_ / ("BilevelCND_" + approach_name + "_" + run_id_ + "_metadata.json");
+    route_counts_file_path_ =
+      output_dir_ / ("BilevelCND_" + approach_name + "_" + run_id_ + "_route_counts.csv");
     summary_file_path_ = output_dir_ / "BilevelCND_run_summary.csv";
 
     trace_points_.clear();
@@ -211,8 +215,8 @@ public:
     }
   }
 
-  /// @brief Finalizes the recording session, flushing trace and writing summary CSV.
-  void StopRun(const CndRunSummary& summary) {
+  /// @brief Finalizes recording with the final assignment's summary and route counts.
+  void StopRun(const CndRunSummary& summary, const std::vector<std::size_t>& route_counts) {
     if (!is_recording_) {
       return;
     }
@@ -221,6 +225,9 @@ public:
     }
     if (config_.write_summary_csv) {
       WriteSummary(summary);
+    }
+    if (summary.status == "success") {
+      WriteRouteCountsCSV(route_counts);
     }
     is_recording_ = false;
   }
@@ -278,10 +285,31 @@ private:
   std::filesystem::path trace_file_path_;
   std::filesystem::path metadata_file_path_;
   std::filesystem::path summary_file_path_;
+  std::filesystem::path route_counts_file_path_;
   std::vector<CndTracePoint> trace_points_;
   std::chrono::steady_clock::time_point run_start_time_;
   double best_feasible_objective_;
   std::size_t flushed_points_;
+
+  void WriteRouteCountsCSV(const std::vector<std::size_t>& route_counts) const {
+    const auto& od_pairs = network_.od_pairs();
+    if (route_counts.size() != od_pairs.size()) {
+      throw std::invalid_argument("Route counts must have one entry per OD pair");
+    }
+    std::ofstream file(route_counts_file_path_);
+    if (!file) {
+      throw std::runtime_error("Cannot write route counts: " + route_counts_file_path_.string());
+    }
+    file << "od_pair_index;init_node;dest_node;routes_count\n";
+    for (std::size_t i = 0; i < od_pairs.size(); ++i) {
+      const auto [origin, destination] = od_pairs[i].GetOriginDestination();
+      file << i << ';' << origin << ';' << destination << ';' << route_counts[i] << '\n';
+    }
+    file.close();
+    if (!file) {
+      throw std::runtime_error("Cannot finish writing route counts: " + route_counts_file_path_.string());
+    }
+  }
 
   std::string GenerateRunId() const {
     const auto now = std::chrono::system_clock::now();

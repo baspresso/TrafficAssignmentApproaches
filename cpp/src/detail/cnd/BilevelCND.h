@@ -407,7 +407,8 @@ private:
     }
     summary.best_feasible_objective = statistics_recorder_.best_feasible_objective();
     summary.max_budget_violation = counters.max_budget_violation;
-    statistics_recorder_.StopRun(summary);
+    statistics_recorder_.StopRun(
+      summary, success ? approach_->GetRouteCountsForStatistics() : std::vector<std::size_t>{});
   }
 
   // =====================================================================

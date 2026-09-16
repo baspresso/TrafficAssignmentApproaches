@@ -338,6 +338,25 @@ supports scenario selection and repeated runs. Use
 summary tables for a run folder. Each script exposes its options through
 `--help`.
 
+CNDP runs with statistics enabled also save final per-OD route counts after the
+last traffic assignment, even when trace output or final diagnostics are disabled.
+The recorder writes `BilevelCND_<approach>_<run_id>_route_counts.csv`; experiment
+runners preserve it as `solutions/<scenario>_route_counts.csv` and generate
+`tables/route_counts.csv` with one column per selected scenario:
+
+```text
+od_pair_index;init_node;dest_node;routes_count_COBYLA;routes_count_BOBYQA;routes_count_OptCond
+```
+
+These new files use semicolons. OD indices and node IDs are zero-based, and rows
+cover the network's positive-demand OD pairs. RouteBased counts only routes with
+final flow greater than zero. **TAPAS reports its stored OD route count**, which
+can be misleading because its route lists do not track the final bush flows.
+Scenario columns retain their run order, including Etalon and repeat suffixes
+when selected. Missing final snapshots leave blank cells; if none are available,
+the table contains only its header. Snapshots with incompatible OD identities
+cannot be combined. A single experiment produces a table with one scenario column.
+
 For TAP comparisons, examine relative gap and runtime together. For CNDP,
 compare the objective, total travel time, investment, and capacity feasibility
 under the same demand, bounds, budget, and TAP tolerance.

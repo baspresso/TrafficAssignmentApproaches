@@ -117,6 +117,17 @@ namespace TrafficAssignment {
       return "TapasNewtonStep";
     }
 
+    std::vector<std::size_t> GetRouteCountsForStatistics() const override {
+      // TAPAS updates bush flows without keeping the stored OD routes in sync.
+      // These raw route counts can therefore mislead about final route usage.
+      std::vector<std::size_t> counts;
+      counts.reserve(this->network_.number_of_od_pairs());
+      for (const auto& od_pair : this->network_.od_pairs()) {
+        counts.push_back(od_pair.GetRoutesCount());
+      }
+      return counts;
+    }
+
   private:
     static constexpr T kZeroFlow = T(1e-15);
     static constexpr T kDirTol = T(1e-15);

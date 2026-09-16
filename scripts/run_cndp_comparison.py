@@ -47,6 +47,7 @@ from run_experiment import (
     create_run_dir,
     post_process_cndp_outputs,
     cleanup_cndp_root,
+    write_route_counts_table,
     resolve_exe,
     get_git_commit,
     PROJECT_ROOT,
@@ -344,6 +345,9 @@ def write_run_manifest(run_dir: Path, dataset: str, comparison_config: dict,
         solution = run_dir / "solutions" / f"{r['scenario']}_solution.csv"
         if solution.exists():
             entry["solution"] = f"solutions/{r['scenario']}_solution.csv"
+        route_counts = run_dir / "solutions" / f"{r['scenario']}_route_counts.csv"
+        if route_counts.exists():
+            entry["route_counts"] = f"solutions/{r['scenario']}_route_counts.csv"
         scenarios_out.append(entry)
 
     manifest = {
@@ -392,10 +396,13 @@ def write_run_readme(run_dir: Path, dataset: str, comparison_config: dict,
         "figures/    - All plots (PNG + PDF)",
         "tables/     - Summary tables (CSV + LaTeX)",
         "traces/     - Per-scenario iteration-level trace data",
-        "solutions/  - Per-scenario final link capacities",
+        "solutions/  - Per-scenario final link capacities and OD route counts",
         "metadata/   - Per-scenario run metadata JSON",
         "configs/    - Exact config files used (for reproducibility)",
         "```",
+        "",
+        "`tables/route_counts.csv` compares final OD route counts (semicolon-separated).",
+        "RouteBased counts positive-flow routes; TAPAS reports stored routes, which can be misleading.",
     ]
     (run_dir / "README.md").write_text("\n".join(lines))
 
@@ -522,6 +529,7 @@ def main():
 
     # Write outputs
     write_comparison_results(results, run_dir)
+    write_route_counts_table(run_dir, [r["scenario"] for r in results])
     write_run_manifest(run_dir, dataset, config, results, total_wall)
     write_run_readme(run_dir, dataset, config, results)
 

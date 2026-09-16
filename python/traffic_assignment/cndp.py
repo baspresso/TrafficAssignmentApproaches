@@ -87,8 +87,9 @@ def solve_cndp(network: Network | str, pipeline, constraints=None, *,
     ``pipeline`` is a non-empty sequence of :func:`step` results or dicts with a
     ``"type"`` key. ``constraints`` is a list of :class:`LinkConstraint`, a CSV
     path, or ``None`` to use the dataset's conventional constraints file.
-    File outputs (trace CSV, metadata JSON, summary CSV) are written only when a
-    ``metrics`` config/dict is given; ``final_diagnostics=True`` additionally
+    File outputs (trace CSV, metadata JSON, summary and final route-count CSVs)
+    are written only when a ``metrics`` config/dict is given;
+    ``final_diagnostics=True`` additionally
     runs the post-run optimality-condition diagnostic and solution CSV dumps.
     The upper-level objective is ``total_travel_time + theta * sum(cap - lb)``
     subject to ``theta * sum(cap - lb) <= budget``.

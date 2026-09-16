@@ -1,0 +1,18 @@
+[network]
+dataset = "SiouxFalls_single_od_1_6_demand_38000"
+
+[solver]
+approach = "RouteBased"
+approach_alpha = 1e-14
+budget_function_multiplier = 5.0
+budget_upper_bound = 40_000.0
+
+[metrics]
+enable_trace = true
+write_metadata_json = true
+write_summary_csv = true
+
+[[pipeline]]
+type = "optimality_condition"
+max_iterations = 100
+tolerance = 1e-4

@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import csv
 import json
 import platform
 import shutil
@@ -426,6 +427,11 @@ def post_process_cndp_outputs(run_dir: Path, scenario_name: str, config_path: Pa
         shutil.move(str(f), str(run_dir / "solutions" / f"{scenario_name}_solution.csv"))
         break
 
+    # Preserve the final OD route counts separately from link solutions.
+    for f in sorted(run_dir.glob("BilevelCND_*_route_counts.csv")):
+        shutil.move(str(f), str(run_dir / "solutions" / f"{scenario_name}_route_counts.csv"))
+        break
+
     # Move metadata JSON
     for f in sorted(run_dir.glob("BilevelCND_*_metadata.json")):
         shutil.move(str(f), str(run_dir / "metadata" / f"{scenario_name}_metadata.json"))
@@ -448,9 +454,52 @@ def post_process_cndp_outputs(run_dir: Path, scenario_name: str, config_path: Pa
 def cleanup_cndp_root(run_dir: Path):
     """Remove leftover C++ output files from run_dir root."""
     for pattern in ["BilevelCND_*_quality_time.csv", "BilevelCND_*_solution.csv",
+                     "BilevelCND_*_route_counts.csv",
                      "BilevelCND_*_metadata.json", "BilevelCND_run_summary.csv"]:
         for f in run_dir.glob(pattern):
             f.unlink(missing_ok=True)
+
+
+def write_route_counts_table(run_dir: Path, scenario_names: list[str]) -> Path:
+    """Combine final OD snapshots, leaving missing scenarios blank."""
+    if len(set(scenario_names)) != len(scenario_names):
+        raise ValueError("Route-count table requires unique scenario names")
+
+    key_fields = ["od_pair_index", "init_node", "dest_node"]
+    snapshots = []
+    expected_keys = None
+    for scenario in scenario_names:
+        path = run_dir / "solutions" / f"{scenario}_route_counts.csv"
+        counts = {}
+        if path.exists():
+            with path.open(newline="", encoding="utf-8") as source:
+                reader = csv.DictReader(source, delimiter=";")
+                if reader.fieldnames != key_fields + ["routes_count"]:
+                    raise ValueError(f"Invalid route-count header in {path}")
+                seen_indices = set()
+                for row in reader:
+                    key = tuple(int(row[field]) for field in key_fields)
+                    count = int(row["routes_count"])
+                    if min(key) < 0 or count < 0 or key[0] in seen_indices:
+                        raise ValueError(f"Invalid or duplicate OD row in {path}")
+                    seen_indices.add(key[0])
+                    counts[key] = count
+            keys = set(counts)
+            if expected_keys is None:
+                expected_keys = keys
+            elif keys != expected_keys:
+                raise ValueError(f"Incompatible OD identities in {path}")
+        snapshots.append(counts)
+
+    output_path = run_dir / "tables" / "route_counts.csv"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", newline="", encoding="utf-8") as output:
+        writer = csv.writer(output, delimiter=";")
+        writer.writerow(key_fields + [f"routes_count_{name}" for name in scenario_names])
+        for key in sorted(expected_keys or ()):
+            writer.writerow([*key, *(counts.get(key, "") for counts in snapshots)])
+    print(f"Route counts written to: {output_path}")
+    return output_path
 
 
 def run_cndp(args):
@@ -525,6 +574,7 @@ def run_cndp(args):
     # Post-process outputs
     post_process_cndp_outputs(run_dir, scenario_name, config_path)
     cleanup_cndp_root(run_dir)
+    write_route_counts_table(run_dir, [scenario_name])
 
     # Generate plots via plot_cndp_comparison.py
     plot_script = PROJECT_ROOT / "scripts" / "plot_cndp_comparison.py"
@@ -574,10 +624,13 @@ def run_cndp(args):
         "figures/    - All plots (PNG + PDF)",
         "tables/     - Summary tables (CSV + LaTeX)",
         "traces/     - Iteration-level trace data",
-        "solutions/  - Final link capacities",
+        "solutions/  - Final link capacities and OD route counts",
         "metadata/   - Run metadata JSON",
         "configs/    - Exact config file used",
         "```",
+        "",
+        "`tables/route_counts.csv` compares final OD route counts (semicolon-separated).",
+        "RouteBased counts positive-flow routes; TAPAS reports stored routes, which can be misleading.",
     ]
     write_readme(run_dir, "\n".join(readme_lines))
 
