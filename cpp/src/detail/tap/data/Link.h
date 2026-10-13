@@ -41,6 +41,7 @@ namespace TrafficAssignment {
 
     mutable T cached_der_ = T(-1);        ///< Cached DelayDer() value.
     mutable T cached_der_flow_ = T(-1);   ///< Flow at which cached_der_ was computed.
+    mutable T cached_der_capacity_ = T(-1); ///< Capacity at which cached_der_ was computed.
 
     /**
      * @brief Constructs a Link object with given parameters.
@@ -145,8 +146,8 @@ namespace TrafficAssignment {
       if (temp_flow == -1) {
         temp_flow = flow;
       }
-      // Return cached value if computing at current stored flow
-      if (temp_flow == flow && cached_der_flow_ == flow) {
+      // CNDP can change capacity while flow stays fixed.
+      if (temp_flow == flow && cached_der_flow_ == flow && cached_der_capacity_ == capacity) {
         return cached_der_;
       }
       if (capacity == 0 || b == 0) {
@@ -164,6 +165,7 @@ namespace TrafficAssignment {
       if (temp_flow == flow) {
         cached_der_ = result;
         cached_der_flow_ = flow;
+        cached_der_capacity_ = capacity;
       }
       return result;
     }

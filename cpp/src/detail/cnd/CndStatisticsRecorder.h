@@ -11,9 +11,11 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 #include "../tap/core/Network.h"
 #include "LinkConstraint.h"  // DirectedLinkCapacityConstraint (complete type; used by WriteSolutionCSV)
@@ -60,6 +62,7 @@ struct CndTracePoint {
   double budget_violation = 0.0;        ///< max(0, budget - budget_upper_bound).
   double relative_gap = std::numeric_limits<double>::quiet_NaN(); ///< TAP relative gap (sampled periodically).
   double ta_compute_seconds = 0.0;      ///< Time spent solving the lower-level TAP.
+  std::optional<std::vector<std::size_t>> route_counts; ///< Per-OD snapshot; absent for invalid evaluations.
 };
 
 /**
@@ -87,11 +90,12 @@ struct CndRunSummary {
 /**
  * @brief Records convergence traces, metadata, and summary statistics for bilevel CNDP experiments.
  *
- * Outputs four file types per run:
+ * Outputs five file types per run:
  * - Trace CSV: per-iteration objective, budget, RGAP, timing (for convergence plots)
  * - Metadata JSON: algorithm configuration and problem parameters
  * - Summary CSV: one-line append-only record per run (for comparison tables)
  * - Route-count CSV: final per-OD route counts, separated by semicolons
+ * - Route-count history CSV: per-OD counts at every trace point, separated by semicolons
  *
  * The summary CSV includes a Scenario column for grouping multiple runs in analysis.
  *
@@ -104,7 +108,8 @@ public:
     : network_(network),
       is_recording_(false),
       best_feasible_objective_(std::numeric_limits<double>::infinity()),
-      flushed_points_(0) {}
+      flushed_points_(0),
+      flushed_route_count_points_(0) {}
 
   /// @brief Initializes a new recording session, creating output files.
   void StartRun(const CndMetricsConfig& config, const CndRunMetadata& metadata) {
@@ -131,16 +136,20 @@ public:
       output_dir_ / ("BilevelCND_" + approach_name + "_" + run_id_ + "_metadata.json");
     route_counts_file_path_ =
       output_dir_ / ("BilevelCND_" + approach_name + "_" + run_id_ + "_route_counts.csv");
+    route_counts_history_file_path_ =
+      output_dir_ / ("BilevelCND_" + approach_name + "_" + run_id_ + "_route_counts_history.csv");
     summary_file_path_ = output_dir_ / "BilevelCND_run_summary.csv";
 
     trace_points_.clear();
     flushed_points_ = 0;
+    flushed_route_count_points_ = 0;
     best_feasible_objective_ = std::numeric_limits<double>::infinity();
     run_start_time_ = std::chrono::steady_clock::now();
     is_recording_ = true;
 
     if (config_.enable_trace) {
       InitializeTraceFile();
+      InitializeRouteCountsHistoryFile();
     }
     if (config_.write_metadata_json) {
       WriteMetadataFile();
@@ -149,6 +158,10 @@ public:
 
   bool IsRecording() const {
     return is_recording_;
+  }
+
+  bool IsTraceEnabled() const {
+    return is_recording_ && config_.enable_trace;
   }
 
   bool ShouldSampleRelativeGap(int step, bool force_sample) const {
@@ -173,7 +186,8 @@ public:
                 double budget_upper_bound,
                 double budget_feasibility_tolerance,
                 double ta_compute_seconds,
-                double relative_gap) {
+                double relative_gap,
+                std::optional<std::vector<std::size_t>> route_counts = std::nullopt) {
     if (!is_recording_) {
       return;
     }
@@ -192,6 +206,10 @@ public:
       return;
     }
 
+    if (route_counts && route_counts->size() != network_.od_pairs().size()) {
+      throw std::invalid_argument("Route counts must have one entry per OD pair");
+    }
+
     trace_points_.push_back(
       {
         ElapsedSeconds(),
@@ -203,7 +221,8 @@ public:
         budget,
         budget_violation,
         relative_gap,
-        ta_compute_seconds
+        ta_compute_seconds,
+        std::move(route_counts)
       }
     );
 
@@ -286,10 +305,64 @@ private:
   std::filesystem::path metadata_file_path_;
   std::filesystem::path summary_file_path_;
   std::filesystem::path route_counts_file_path_;
+  std::filesystem::path route_counts_history_file_path_;
   std::vector<CndTracePoint> trace_points_;
   std::chrono::steady_clock::time_point run_start_time_;
   double best_feasible_objective_;
   std::size_t flushed_points_;
+  std::size_t flushed_route_count_points_;
+
+  static std::string QuoteHistoryField(const std::string& value) {
+    if (value.find_first_of(";\"\r\n") == std::string::npos) return value;
+    std::string quoted = "\"";
+    for (char c : value) {
+      if (c == '"') quoted += '"';
+      quoted += c;
+    }
+    return quoted + '"';
+  }
+
+  void InitializeRouteCountsHistoryFile() const {
+    std::ofstream file(route_counts_history_file_path_);
+    file << "RunId;Scenario;TracePointIndex;ElapsedTime(s);Phase;Step;"
+            "od_pair_index;init_node;dest_node;routes_count\n";
+    file.close();
+    if (!file) {
+      throw std::runtime_error("Cannot initialize route-count history: " +
+                               route_counts_history_file_path_.string());
+    }
+  }
+
+  void AppendPendingRouteCountPoints() {
+    if (flushed_route_count_points_ >= trace_points_.size()) return;
+    std::ofstream file(route_counts_history_file_path_, std::ios::app);
+    file << std::setprecision(10);
+    const auto run_id = QuoteHistoryField(run_id_);
+    const auto scenario = QuoteHistoryField(metadata_.scenario_name);
+    const auto& od_pairs = network_.od_pairs();
+    for (std::size_t i = flushed_route_count_points_; i < trace_points_.size(); ++i) {
+      const auto& point = trace_points_[i];
+      const auto phase = QuoteHistoryField(point.phase);
+      for (std::size_t od = 0; od < od_pairs.size(); ++od) {
+        const auto [origin, destination] = od_pairs[od].GetOriginDestination();
+        file << run_id << ';' << scenario << ';' << i << ';'
+             << point.elapsed_seconds << ';' << phase << ';' << point.step << ';'
+             << od << ';' << origin << ';' << destination << ';';
+        if (point.route_counts) file << (*point.route_counts)[od];
+        file << '\n';
+      }
+    }
+    file.close();
+    if (!file) {
+      throw std::runtime_error("Cannot write route-count history: " +
+                               route_counts_history_file_path_.string());
+    }
+    // Keep scalar trace data, but release the much larger per-OD snapshots after flushing.
+    for (std::size_t i = flushed_route_count_points_; i < trace_points_.size(); ++i) {
+      trace_points_[i].route_counts.reset();
+    }
+    flushed_route_count_points_ = trace_points_.size();
+  }
 
   void WriteRouteCountsCSV(const std::vector<std::size_t>& route_counts) const {
     const auto& od_pairs = network_.od_pairs();
@@ -362,6 +435,7 @@ private:
 
   void AppendPendingTracePoints() {
     if (flushed_points_ >= trace_points_.size()) {
+      AppendPendingRouteCountPoints();
       return;
     }
     std::ofstream file(trace_file_path_, std::ios::app);
@@ -386,7 +460,12 @@ private:
            << point.relative_gap << ","
            << point.ta_compute_seconds << "\n";
     }
+    file.close();
+    if (!file) {
+      throw std::runtime_error("Cannot write convergence trace: " + trace_file_path_.string());
+    }
     flushed_points_ = trace_points_.size();
+    AppendPendingRouteCountPoints();
   }
 
   void WriteMetadataFile() const {

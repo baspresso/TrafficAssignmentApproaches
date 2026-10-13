@@ -422,6 +422,11 @@ def post_process_cndp_outputs(run_dir: Path, scenario_name: str, config_path: Pa
         shutil.move(str(f), str(run_dir / "traces" / f"{scenario_name}_trace.csv"))
         break
 
+    # Preserve per-OD history beside the matching convergence trace.
+    for f in sorted(run_dir.glob("BilevelCND_*_route_counts_history.csv")):
+        shutil.move(str(f), str(run_dir / "traces" / f"{scenario_name}_route_counts_history.csv"))
+        break
+
     # Move solution CSV
     for f in sorted(run_dir.glob("BilevelCND_*_solution.csv")):
         shutil.move(str(f), str(run_dir / "solutions" / f"{scenario_name}_solution.csv"))
@@ -454,7 +459,7 @@ def post_process_cndp_outputs(run_dir: Path, scenario_name: str, config_path: Pa
 def cleanup_cndp_root(run_dir: Path):
     """Remove leftover C++ output files from run_dir root."""
     for pattern in ["BilevelCND_*_quality_time.csv", "BilevelCND_*_solution.csv",
-                     "BilevelCND_*_route_counts.csv",
+                     "BilevelCND_*_route_counts.csv", "BilevelCND_*_route_counts_history.csv",
                      "BilevelCND_*_metadata.json", "BilevelCND_run_summary.csv"]:
         for f in run_dir.glob(pattern):
             f.unlink(missing_ok=True)
@@ -623,13 +628,16 @@ def run_cndp(args):
         "```",
         "figures/    - All plots (PNG + PDF)",
         "tables/     - Summary tables (CSV + LaTeX)",
-        "traces/     - Iteration-level trace data",
+        "traces/     - Iteration-level convergence traces and OD route-count histories",
         "solutions/  - Final link capacities and OD route counts",
         "metadata/   - Run metadata JSON",
         "configs/    - Exact config file used",
         "```",
         "",
         "`tables/route_counts.csv` compares final OD route counts (semicolon-separated).",
+        "`traces/<scenario>_route_counts_history.csv` records each OD at every convergence trace point.",
+        "History follows `enable_trace` and `flush_every_n_points`; `TracePointIndex` is the zero-based trace row index.",
+        "History uses semicolons, shares trace timestamps/phases/steps, and leaves counts blank for invalid evaluations.",
         "RouteBased counts positive-flow routes; TAPAS reports stored routes, which can be misleading.",
     ]
     write_readme(run_dir, "\n".join(readme_lines))

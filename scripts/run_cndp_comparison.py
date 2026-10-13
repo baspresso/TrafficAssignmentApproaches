@@ -342,6 +342,9 @@ def write_run_manifest(run_dir: Path, dataset: str, comparison_config: dict,
         trace = run_dir / "traces" / f"{r['scenario']}_trace.csv"
         if trace.exists():
             entry["trace"] = f"traces/{r['scenario']}_trace.csv"
+        route_history = run_dir / "traces" / f"{r['scenario']}_route_counts_history.csv"
+        if route_history.exists():
+            entry["route_counts_history"] = f"traces/{r['scenario']}_route_counts_history.csv"
         solution = run_dir / "solutions" / f"{r['scenario']}_solution.csv"
         if solution.exists():
             entry["solution"] = f"solutions/{r['scenario']}_solution.csv"
@@ -395,13 +398,16 @@ def write_run_readme(run_dir: Path, dataset: str, comparison_config: dict,
         "```",
         "figures/    - All plots (PNG + PDF)",
         "tables/     - Summary tables (CSV + LaTeX)",
-        "traces/     - Per-scenario iteration-level trace data",
+        "traces/     - Per-scenario convergence traces and OD route-count histories",
         "solutions/  - Per-scenario final link capacities and OD route counts",
         "metadata/   - Per-scenario run metadata JSON",
         "configs/    - Exact config files used (for reproducibility)",
         "```",
         "",
         "`tables/route_counts.csv` compares final OD route counts (semicolon-separated).",
+        "`traces/<scenario>_route_counts_history.csv` records each OD at every convergence trace point.",
+        "History follows `enable_trace` and `flush_every_n_points`; `TracePointIndex` is the zero-based trace row index.",
+        "History uses semicolons, shares trace timestamps/phases/steps, and leaves counts blank for invalid evaluations.",
         "RouteBased counts positive-flow routes; TAPAS reports stored routes, which can be misleading.",
     ]
     (run_dir / "README.md").write_text("\n".join(lines))

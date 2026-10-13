@@ -7,7 +7,7 @@ etalon_time_limit = 7200
 dataset = "SiouxFalls"
 
 [defaults.solver]
-approach = "TAPAS"
+approach = "RouteBased"
 approach_alpha = 1e-14
 budget_function_multiplier = 5.0
 budget_upper_bound = 100_000.0
@@ -16,7 +16,7 @@ budget_upper_bound = 100_000.0
 enable_trace = true
 write_metadata_json = true
 write_summary_csv = true
-flush_every_n_points = 10
+flush_every_n_points = 5
 
 # --- Etalon ---
 

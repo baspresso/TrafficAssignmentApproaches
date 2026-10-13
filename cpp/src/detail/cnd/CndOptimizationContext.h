@@ -10,6 +10,8 @@
 #include <sstream>
 #include <algorithm>
 #include <limits>
+#include <optional>
+#include <utility>
 #include <nlopt.hpp>
 #include "../tap/algorithms/TrafficAssignmentApproach.h"
 #include "../tap/core/Network.h"
@@ -347,10 +349,15 @@ public:
       relative_gap = static_cast<double>(network.RelativeGap());
     }
 
+    std::optional<std::vector<std::size_t>> route_counts;
+    if (values_finite && statistics_recorder.IsTraceEnabled()) {
+      route_counts = approach->GetRouteCountsForStatistics();
+    }
+
     statistics_recorder.LogPoint(
       phase, step, objective, total_travel_time, budget,
       budget_upper_bound, static_cast<double>(budget_threshold),
-      ta_compute_seconds, relative_gap
+      ta_compute_seconds, relative_gap, std::move(route_counts)
     );
   }
 

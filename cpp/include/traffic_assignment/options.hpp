@@ -31,10 +31,10 @@ struct StepConfig {
 };
 
 struct MetricsConfig {
-  bool enable_trace = true;             ///< Write per-iteration trace CSV (objective vs time).
+  bool enable_trace = true;             ///< Write convergence and per-OD route-count history CSVs.
   bool enable_relative_gap = true;      ///< Sample TAP relative gap during trace recording.
   int relative_gap_sample_period = 10;  ///< Sample RGAP every N trace points (expensive to compute).
-  int flush_every_n_points = 0;         ///< Flush trace to disk every N points (0 = flush at end).
+  int flush_every_n_points = 0;         ///< Flush both trace CSVs every N points (0 = flush at end).
   bool write_metadata_json = true;      ///< Write JSON file with algorithm config and run parameters.
   bool write_summary_csv = true;        ///< Append one-line summary to shared CSV (append-only).
   bool append_dataset_subdir = true;    ///< Append dataset name as subdirectory to output_root.

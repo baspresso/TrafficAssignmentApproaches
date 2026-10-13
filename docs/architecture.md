@@ -167,8 +167,9 @@ Copies at the Python boundary are intentional so returned arrays remain valid
 after native objects are destroyed or reused.
 
 This reorganization preserves the numerical algorithms and CSV data conventions.
-A returned result does not certify convergence or feasibility. Unreachable-demand
-handling, capacity-derivative caching, TNTP transit-node semantics, and experimental
+A returned result does not certify convergence or feasibility. The link-cost
+derivative cache tracks both flow and capacity, including capacity changes made
+by CNDP. Unreachable-demand handling, TNTP transit-node semantics, and experimental
 optimizer crash recovery remain separate correctness work.
 
 ## Development checks

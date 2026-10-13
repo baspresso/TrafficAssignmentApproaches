@@ -41,6 +41,11 @@ if(BUILD_PYTHON_BINDINGS)
 endif()
 
 if(BUILD_NATIVE_TESTS)
+  add_executable(test_link_derivative ../tests/cpp/test_link_derivative.cpp)
+  target_include_directories(test_link_derivative PRIVATE src)
+  target_link_libraries(test_link_derivative PRIVATE traffic_assignment::core Eigen3::Eigen)
+  add_test(NAME link_derivative COMMAND test_link_derivative)
+
   add_executable(test_native_api ../tests/cpp/test_native_api.cpp)
   target_link_libraries(test_native_api PRIVATE traffic_assignment::core)
   add_test(NAME native_api COMMAND test_native_api)

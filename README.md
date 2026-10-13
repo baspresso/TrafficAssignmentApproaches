@@ -1,398 +1,167 @@
 # TrafficAssignmentApproaches
 
-**Traffic assignment and continuous network design with a shared C++ core and Python API.**
+**C++20 · Python · Graph algorithms · Bilevel optimization**
 
-TrafficAssignmentApproaches implements solvers for the **Traffic Assignment
-Problem (TAP)** and the **Continuous Network Design Problem (CNDP)**. It combines
-user-equilibrium traffic assignment with bilevel optimization of road-network
-capacities, supporting both algorithm research and computational experiments.
-The project grew out of graduate-level research at Saint Petersburg State
-University.
+Predict how traffic distributes across a road network, then optimize road
+capacities under an investment budget while accounting for how drivers reroute.
+TrafficAssignmentApproaches combines numerical algorithms with a reusable
+C++ library, a Python API, and reproducible computational experiments.
 
-You can use the solvers through the `traffic_assignment` Python package, the
-`traffic_assignment::core` C++ library, or the `tap_solver` and `cndp_solver`
-command-line applications. The repository also includes DataFrame adapters,
-notebooks, configurable optimization pipelines, and experiment runners.
+The project grew out of graduate research at Saint Petersburg State University.
 
-## Problems and Methods
+[Benchmark study](docs/benchmarks/README.md) ·
+[Quick start](#quick-start) ·
+[Related publication](#related-publication) ·
+[Architecture](docs/architecture.md) ·
+[User guide](docs/usage.md)
 
-### Traffic assignment (TAP)
+## What the project implements
 
-Given a directed road network, link travel-time functions, and an
-origin–destination (OD) demand matrix, TAP computes traffic flows at user
-equilibrium. Under **Wardrop's first principle**, no traveler can improve their
-travel time by changing routes alone.
+- **Equilibrium assignment:** TAPAS with paired alternative segments and
+  route-based assignment with Newton flow redistribution and parallel
+  shortest-path searches.
+- **Capacity optimization:** a bilevel model that repeatedly solves traffic
+  assignment while allocating a limited investment budget. Optimizers include
+  NLopt methods, optimality-condition updates, and gradient-based pipelines.
+- **One computation core:** the C++ library, Python bindings, and command-line
+  applications share the same implementation. NumPy result arrays are independent
+  snapshots; pandas input adapters are optional.
+- **Numerical validation:** analytic examples, native and Python tests, and
+  independent benchmark checks for flow conservation, equilibrium accuracy,
+  investment, and capacity bounds.
 
-Links use the Bureau of Public Roads (BPR) travel-time function:
+## Measured results
 
-```text
-travel_time = free_flow_time * (1 + b * (flow / capacity) ** power)
-```
+The [benchmark study](docs/benchmarks/README.md) compares both assignment methods
+at three accuracy targets, measures route-search scaling with 1–8 threads, and
+evaluates a capacity-expansion scenario. Inputs come from a pinned revision of
+[Transportation Networks for Research](https://github.com/bstabler/TransportationNetworks).
 
-Two TAP approaches are available, both for standalone assignment and as the
-lower-level solver in CNDP:
+On an Intel Core i7-13650HX with a GCC 15.2 Release build:
 
-| Approach | Python selector | Implementation |
-| --- | --- | --- |
-| TAPAS (Traffic Assignment by Paired Alternative Segments) | `"tapas"` | Bush-based assignment using paired alternative segments, with Halley flow shifts and Armijo backtracking. Default approach. |
-| Route-based assignment | `"routebased"` | Explicit OD paths with Newton-step flow redistribution and configurable parallel route search. |
-
-TAP results include link flows, link travel times, total travel time, the
-Beckmann objective, relative gap, and elapsed solve time. Relative gap measures
-how close the computed assignment is to user equilibrium.
-
-### Continuous network design (CNDP)
-
-CNDP chooses continuous link capacities on a fixed network topology. The
-upper-level optimizer evaluates capacity changes by solving TAP at the lower
-level, accounting for how travelers reroute after an investment.
-
-The implemented design model is:
-
-```text
-investment = theta * sum(capacity - lower_bound)
-minimize:    total_travel_time_at_user_equilibrium + investment
-subject to: lower_bound <= capacity <= upper_bound
-            investment <= budget
-```
-
-Bounds are **absolute capacities**. CNDP starts at the lower bounds; use the
-original capacities as lower bounds to model expansion only. Equal bounds fix a
-link's capacity. `theta` is a uniform investment-cost multiplier; the optional
-per-link `investment_cost_param` field is currently metadata and does not change
-the objective. See the [capacity and budget guide](docs/dataframes.md#cndp-constraints).
-
-Optimization steps run sequentially, each continuing from the capacities left
-by the previous step. A pipeline can contain one method or combine several:
-
-| Pipeline type | Available methods |
+| Study result | Measured outcome |
 | --- | --- |
-| `nlopt` | NLopt algorithms, including COBYLA, BOBYQA, and ISRES. |
-| `optimality_condition` | Sensitivity-based capacity updates using network-design optimality conditions. |
-| `optimlib` | OptimLib methods, including differential evolution, particle swarm optimization, and Nelder–Mead. |
-| `gradient_descent` | Projected gradient descent with finite-difference, SPSA, or sensitivity-based gradient estimates. |
+| Assignment scale | Chicago Sketch: **933 nodes, 2,950 links, 93,135 interzonal OD pairs** |
+| Accuracy | Both solvers met requested relative gaps down to **1e-10** on both networks |
+| Chicago Sketch runtime | **3.959 s** for route-based assignment at target gap 1e-8; median of five runs |
+| Capacity optimization | **17.30% lower simulated travel time** on Sioux Falls, within the investment budget and capacity bounds |
+| Validation | **78/78 measured runs passed**, plus 16 successful warm-ups |
 
-Budget handling depends on the method: supported NLopt algorithms use an
-explicit inequality constraint, while other methods use penalties and/or
-capacity projection. Inspect the returned budget usage and effective bounds
-when evaluating a design; completing a pipeline does not certify a global
-optimum.
+Parallel route search gave 0.90×, 0.96×, and 1.02× whole-solve speedups with
+2, 4, and 8 threads respectively. The eight-thread and serial timing ranges
+overlap; this workload shows little overall benefit from additional threads.
 
-## Installation
+![Assignment runtime at matched accuracy targets](docs/benchmarks/figures/assignment_runtime.svg)
 
-The core uses **C++20**, **CMake 3.24+**, Ninja, Eigen3, NLopt, and Boost.
-The Python package requires **Python 3.11+** and NumPy, with optional pandas and
-notebook dependencies.
+The report includes all repetitions, validation results, machine/build details,
+input checksums, and commands to regenerate its tables and figures. Chicago Sketch
+uses a **travel-time-only** model; Sioux Falls is a small research benchmark.
+Capacity-optimization results describe simulated outcomes under the stated
+investment assumptions.
 
-On Ubuntu/Debian, install the native build prerequisites:
+## Quick start
+
+Requires **Python 3.11+**, a **C++20** compiler, and **CMake 3.24+**.
+On Ubuntu/Debian, install the native prerequisites:
 
 ```bash
 sudo apt install build-essential cmake ninja-build pkg-config git \
                  libeigen3-dev libnlopt-cxx-dev libboost-all-dev \
                  python3-dev python3-venv
-```
-
-CMake fetches OptimLib during configuration and also fetches toml++ when
-building the standalone applications, so the initial build needs network access.
-
-### Python package
-
-From the repository root, create an environment using Python 3.11 or newer and
-install the package:
-
-```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
 ```
 
-This builds the native extension through scikit-build-core and pybind11.
-Optional extras provide DataFrame adapters, notebooks, and test dependencies:
-
-```bash
-python -m pip install -e '.[dataframes]'  # pandas input adapters
-python -m pip install -e '.[examples]'    # pandas, plotting, and Jupyter
-python -m pip install -e '.[test]'        # pytest and pandas
-```
-
-### Standalone C++ applications
-
-Configure and build from the repository root:
-
-```bash
-cmake --preset linux-release
-cmake --build --preset build-release
-```
-
-The executables are written to `build/linux-release/`. Debug and RelWithDebInfo
-configure/build presets are also available in [CMakePresets.json](CMakePresets.json).
-
-## Python Quick Start
-
-This example solves both problems on a small network constructed in memory.
-It requires no dataset files or pandas installation.
+The first build downloads pinned native dependencies. From the repository root,
+solve a network with two competing routes; no dataset download is needed:
 
 ```python
 import traffic_assignment as ta
 
-# Two alternatives from node 0 to node 1: a direct link and a route via node 2.
 network = ta.network_from_arrays(
-    "TwoRoutes", init_node=[0, 0, 2], term_node=[1, 2, 1],
-    capacity=10.0, free_flow_time=[2.0, 1.0, 1.0], b=1.0, power=1.0,
-    demand=[[0.0, 10.0], [0.0, 0.0]], n_nodes=3,
+    "TwoRoutes",
+    init_node=[0, 0, 2], term_node=[1, 2, 1],
+    capacity=10.0, free_flow_time=[2.0, 1.0, 1.0],
+    b=1.0, power=1.0, demand=[[0.0, 10.0], [0.0, 0.0]],
+    n_nodes=3,
 )
+assignment = ta.solve_tap(network)
+print(assignment.flows)              # [5. 5. 5.]
+print(assignment.total_travel_time)  # 30.0
 
-# TAP: find user-equilibrium flows at the original capacities.
-assignment = ta.solve_tap(network, approach="tapas")
-print("Link flows:", assignment.flows)  # [5, 5, 5]
-print("Total travel time:", assignment.total_travel_time)  # 30
-print("Relative gap:", assignment.relative_gap)
-
-# CNDP: allow each link to expand from capacity 10 to at most 20.
 constraints = ta.constraints_from_arrays(network, lower=10.0, upper=20.0)
 design = ta.solve_cndp(
     network,
     [ta.step("nlopt", algorithm="LN_COBYLA", max_iterations=100)],
-    constraints=constraints,
-    theta=0.1,
-    budget=2.0,
+    constraints=constraints, theta=0.1, budget=2.0,
 )
-print("Designed capacities:", design.capacities)
-print("Final total travel time:", design.total_travel_time)
-print("Investment used:", design.budget)
-print("Objective (travel time + investment):", design.objective)
+print(design.capacities)
+print(design.total_travel_time)
 ```
 
-`solve_tap` and `solve_cndp` return dataclasses containing metrics and NumPy
-arrays. Solving updates the supplied network, and CNDP changes its capacities;
-construct a fresh network for independent scenarios. Result arrays are snapshots.
-The standalone [two-route example](examples/two_routes.py) also demonstrates
-typed TAP options.
+Solvers update the supplied network; construct a fresh network for independent
+scenarios. Results expose numerical metrics for checking convergence and
+feasibility. See the [full Python examples](docs/usage.md#python-quick-start) and
+[model definition](docs/usage.md#problems-and-methods).
 
-For more control, use `TapOptions`, `CndpOptions`, and the exposed solver objects
-(`Network`, `TapasApproach`, `RouteBasedApproach`, `BilevelCND`). Python and the
-executables share the same native implementation: TAP arithmetic uses
-`long double`, while optimizer interfaces and returned NumPy arrays use
-double precision. See the [architecture guide](docs/architecture.md).
+For DataFrame workflows and visualization, install `pip install -e '.[examples]'`
+and open the self-contained [Sioux Falls assignment](examples/siouxfalls_tap.ipynb)
+or [capacity optimization](examples/siouxfalls_cndp.ipynb) notebook.
 
-CNDP file outputs are off by default in Python. Pass a `metrics=` configuration
-to enable trace CSV, metadata JSON, and summary CSV output;
-`final_diagnostics=True` additionally enables the final diagnostic and solution
-CSV files.
+## Related publication
 
-## Inputs and Notebooks
+Alexander Krylatov, **Maksim Korol**, and Anastasiya Raevskaya.
+**[Equilibration Operators for Accurate Traffic Flow Assignment in Urban Road Networks](https://doi.org/10.1007/978-3-031-70300-3_39)**.
+In *Cybernetics and Control Theory in Systems*, CSOC 2024,
+Lecture Notes in Networks and Systems, vol. 1119, pp. 526–535.
+Springer, 2024. [BibTeX](docs/references.bib).
 
-Both solvers consume the same native network. Build it from pandas DataFrames,
-NumPy arrays, or preprocessed benchmark CSV files. CNDP also requires capacity
-constraints, which can be prepared from DataFrames, arrays, or a CSV file.
+This coauthored publication studies equilibration operators for accurate
+traffic assignment. It provides related research context; the benchmark study
+in this repository evaluates the current software independently.
 
-### DataFrames
-
-With the `dataframes` extra installed and your input tables prepared:
-
-```python
-import traffic_assignment as ta
-
-# links_df: per-link columns; demand_df: square matrix labelled by zone ID
-network = ta.network_from_dataframes(
-    "MyNetwork", links_df, demand_df, node_index_base=1,
-)
-result = ta.solve_tap(network)
-
-# constraints_df: link_index, lower_bound, upper_bound (one row per link)
-constraints = ta.constraints_from_dataframe(network, constraints_df, node_index_base=1)
-design = ta.solve_cndp(
-    network,
-    [ta.step("nlopt", algorithm="LN_COBYLA", max_iterations=100)],
-    constraints=constraints,
-    budget=10000.0,
-)
-```
-
-The [DataFrame input guide](docs/dataframes.md) documents columns, node and link
-indexing, validation, and capacity constraints. The
-[solver input guide](docs/inputs.md) covers the shared numerical contract and
-CSV formats.
-
-### Self-contained notebooks
-
-Both Sioux Falls notebooks construct their input DataFrames from embedded
-benchmark values. They need no dataset files or downloads after installing the
-`examples` extra:
-
-- [TAP with DataFrames](examples/siouxfalls_tap.ipynb): construct the network,
-  solve equilibrium, inspect flows and congestion, compare approaches, and
-  change demand.
-- [CNDP with DataFrames](examples/siouxfalls_cndp.ipynb): construct capacity
-  constraints, solve the baseline TAP and network design, check the budget and
-  bounds, and compare capacity and flow changes.
-
-Start `jupyter lab examples/` and select a kernel with the package installed.
-
-### Benchmark datasets
-
-The benchmark workflows use networks from the
-[Transportation Networks for Research](https://github.com/bstabler/TransportationNetworks)
-collection. Solver configurations are provided for Sioux Falls, Anaheim,
-Barcelona, Chicago Sketch, Sydney, Winnipeg, and other scenarios under
-[`configs/`](configs/).
-
-Dataset files are not tracked in this repository. File-based workflows expect
-preprocessed `*_net.csv` and `*_trips.csv` files, plus capacity constraints for
-CNDP, under `data/TransportationNetworks/<Dataset>/`. The loader reads these
-CSV formats, not raw `.tntp` files. The
-[dataset-processing notebook](scripts/dataset_processor.ipynb) contains the
-TNTP conversion workflow; see [solver inputs](docs/inputs.md#file-loading-and-indexing)
-for the expected formats.
-
-In Python, load prepared data explicitly:
-
-```python
-import traffic_assignment as ta
-
-network = ta.load_network("SiouxFalls")
-constraints = ta.load_constraints(ta.default_constraints_path("SiouxFalls"))
-assignment = ta.solve_tap(network)
-```
-
-Python dataset discovery walks up from the working directory looking for
-`data/TransportationNetworks`. Override it with `data_root=` on the loaders or
-the `TRAFFIC_ASSIGNMENT_DATA` environment variable.
-
-## Command-Line Usage and Configuration
-
-After building the applications and preparing the dataset files, run from the
-repository root:
+## Reproduce the study
 
 ```bash
-./build/linux-release/tap_solver --config configs/tap.siouxfalls.toml
-./build/linux-release/cndp_solver --config configs/cnd.siouxfalls.toml
-./build/linux-release/tap_solver --help
-./build/linux-release/cndp_solver --help
+python -m pip install -e '.[examples,test]' -Ccmake.build-type=Release
+
+# Short installation and numerical-validation check.
+python scripts/run_benchmarks.py --profile quick \
+  --output performance_results/benchmark-quick
+
+# Full study: repeated measurements, with a one-hour worker budget.
+python scripts/run_benchmarks.py --profile full --time-budget 3600 \
+  --output performance_results/benchmark-full
+
+# Regenerate the report and figures from saved measurements.
+python scripts/run_benchmarks.py --render-only performance_results/benchmark-full
 ```
 
-`cndp_solver` resolves settings in order of increasing priority:
-**defaults → TOML file → environment variables → CLI arguments**. Select a
-config with `--config` or `CND_CONFIG`; environment overrides use the `CND_`
-prefix.
+The runner retrieves pinned source inputs and caches them separately from existing
+datasets. With a local TransportationNetworks Git clone, add
+`--source-root data/TransportationNetworks` to prepare inputs offline.
+See the [study methodology](docs/benchmarks/README.md#methodology-and-validation)
+for timing boundaries, validation criteria, and limitations.
 
-A CNDP config specifies a network, solver settings, and at least one
-`[[pipeline]]` entry. For example, this pipeline starts with COBYLA and then
-applies optimality-condition updates:
+## Documentation and development
 
-```toml
-[network]
-dataset = "SiouxFalls"
-
-[solver]
-approach = "Tapas"
-approach_alpha = 1e-14
-budget_function_multiplier = 5.0
-budget_upper_bound = 100_000.0
-
-[[pipeline]]
-type = "nlopt"
-algorithm = "LN_COBYLA"
-max_iterations = 100
-tolerance = 1e-4
-
-[[pipeline]]
-type = "optimality_condition"
-max_iterations = 20
-```
-
-The same sequence can be expressed as a list of `ta.step(...)` objects in
-Python. See [the reference CNDP config](configs/cnd.siouxfalls.toml) for an
-example with metrics enabled.
-
-CLI arguments override both the config and environment settings:
-
-```bash
-CND_ROUTE_THREADS=1 ./build/linux-release/cndp_solver \
-    --config configs/cnd.siouxfalls.toml \
-    --route-threads 2 \
-    --max-standard-iterations 150
-```
-
-## Experiments and Analysis
-
-Experiment runners launch the standalone applications and organize configs,
-metrics, and plots in run folders under `performance_results/`. They require
-the built executables and prepared datasets; the Python `examples` extra
-provides the plotting dependencies.
-
-```bash
-# Run one TAP or CNDP experiment.
-python scripts/run_experiment.py tap --dataset SiouxFalls
-python scripts/run_experiment.py cndp --config configs/cnd.siouxfalls.toml
-
-# Compare CNDP scenarios defined in a TOML manifest.
-python scripts/run_cndp_comparison.py configs/comparisons/siouxfalls.toml
-```
-
-Comparison manifests under [`configs/comparisons/`](configs/comparisons/)
-define shared defaults and per-scenario pipelines. The comparison runner
-supports scenario selection and repeated runs. Use
-[`scripts/plot_cndp_comparison.py`](scripts/plot_cndp_comparison.py) with
-`--run-dir` to produce objective/convergence plots, budget-usage plots, and
-summary tables for a run folder. Each script exposes its options through
-`--help`.
-
-CNDP runs with statistics enabled also save final per-OD route counts after the
-last traffic assignment, even when trace output or final diagnostics are disabled.
-The recorder writes `BilevelCND_<approach>_<run_id>_route_counts.csv`; experiment
-runners preserve it as `solutions/<scenario>_route_counts.csv` and generate
-`tables/route_counts.csv` with one column per selected scenario:
-
-```text
-od_pair_index;init_node;dest_node;routes_count_COBYLA;routes_count_BOBYQA;routes_count_OptCond
-```
-
-These new files use semicolons. OD indices and node IDs are zero-based, and rows
-cover the network's positive-demand OD pairs. RouteBased counts only routes with
-final flow greater than zero. **TAPAS reports its stored OD route count**, which
-can be misleading because its route lists do not track the final bush flows.
-Scenario columns retain their run order, including Etalon and repeat suffixes
-when selected. Missing final snapshots leave blank cells; if none are available,
-the table contains only its header. Snapshots with incompatible OD identities
-cannot be combined. A single experiment produces a table with one scenario column.
-
-For TAP comparisons, examine relative gap and runtime together. For CNDP,
-compare the objective, total travel time, investment, and capacity feasibility
-under the same demand, bounds, budget, and TAP tolerance.
-
-## Repository Structure
-
-| Path | Contents |
+| Guide | Contents |
 | --- | --- |
-| [`cpp/include/traffic_assignment/`](cpp/include/traffic_assignment/) | Public C++ API for networks, options, solvers, and results. |
-| [`cpp/src/`](cpp/src/) | Compiled core and private TAP/CNDP implementations under `detail/`. |
-| [`cpp/bindings/`](cpp/bindings/) | pybind11 bindings. |
-| [`cpp/apps/`](cpp/apps/) | Standalone solvers and runtime configuration. |
-| [`python/traffic_assignment/`](python/traffic_assignment/) | Python API, input adapters, and dataset loaders. |
-| [`examples/`](examples/) | Small Python example and Sioux Falls notebooks. |
-| [`configs/`](configs/) | TAP/CNDP settings and comparison manifests. |
-| [`scripts/`](scripts/) | Dataset preparation, experiment runners, and analysis. |
-| [`tests/`](tests/) | Python tests and native C++ API tests. |
-
-The Python extension and standalone applications link the same C++ library,
-`traffic_assignment::core`. See the [architecture guide](docs/architecture.md)
-for C++ integration, ownership, build options, and current implementation limits.
-
-## Development Checks
-
-Run the Python tests and the small TAP example after installing the package:
+| [User guide](docs/usage.md) | Models, native installation, Python/C++ usage, configuration, and experiment tools |
+| [Architecture](docs/architecture.md) | Shared core, bindings, ownership, precision, and implementation limits |
+| [Solver inputs](docs/inputs.md) | Numerical contracts, CSV formats, and indexing |
+| [DataFrame inputs](docs/dataframes.md) | pandas adapters, label alignment, and capacity constraints |
+| [Benchmark evidence](docs/benchmarks/README.md#evidence) | Raw measurements, summaries, configurations, and provenance |
 
 ```bash
 python -m pip install -e '.[test]'
 python -m pytest tests/
-python examples/two_routes.py
-```
 
-Enable and run the native API tests with:
-
-```bash
 cmake --preset linux-release -DBUILD_NATIVE_TESTS=ON
 cmake --build --preset build-release
 ctest --test-dir build/linux-release --output-on-failure
 ```
+
+The public C++ API is under `cpp/include/traffic_assignment/`, Python adapters
+under `python/traffic_assignment/`, and standalone applications under `cpp/apps/`.
