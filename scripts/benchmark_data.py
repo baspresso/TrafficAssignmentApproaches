@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
-import heapq
+import io
+import json
 import math
 from pathlib import Path
 import re
 import subprocess
 from urllib.request import urlopen
+from zipfile import ZipFile
 
 import numpy as np
 
@@ -28,11 +30,31 @@ SOURCES = {
         "trips": ("Chicago-Sketch/ChicagoSketch_trips.tntp",
                   "efe68abffc4af09e344cf1e175cfc048c08f4cd8f1f5454f74371b40e8245edc"),
     },
+    "Anaheim": {
+        "net": ("Anaheim/Anaheim_net.tntp",
+                "99933b415e9500b13907829c37a43cfa9141714fad5af279081e28e5f9356f9a"),
+        "trips": ("Anaheim/Anaheim_trips.tntp",
+                  "906893854cd0db4479c0b5f07678ce5616fa8e42e2b997f918c378309c66a94e"),
+    },
+    "Sydney": {
+        "net": ("Sydney/Sydney_net.tntp",
+                "cf7162f01eb9518b246e7a761f7bb02b3c154577f9a4514fed419fd957c08923"),
+        "trips": ("Sydney/Sydney_trips.tntp.zip",
+                  "85acc191d27c7c36c60d86d4f00f5c177caf01b799ca8add355e153b91a1ac33"),
+    },
 }
+SYDNEY_MEMBER = "Sydney_trips.tntp"
+SYDNEY_MEMBER_SHA256 = "6f98db94972c535ec0590ac911ccdc816d9db63f81705ac73593bbbe9afda735"
+SYDNEY_DEMAND_SHA256 = "eee076405349109bcfea762e24a8478dc8b272c6c6d8fd9ec0e45dd99bca9778"
+PREPARATION_VERSION = 1
 
 
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def array_sha256(array: np.ndarray) -> str:
+    return sha256(np.asarray(array, dtype="<f8", order="C").tobytes())
 
 
 def prepare_data(cache: Path, datasets: list[str], source_root: Path | None) -> dict:
@@ -42,7 +64,8 @@ def prepare_data(cache: Path, datasets: list[str], source_root: Path | None) -> 
     for name in datasets:
         manifest[name] = {}
         for kind, (upstream_path, checksum) in SOURCES[name].items():
-            destination = cache / f"{name}_{kind}.tntp"
+            suffix = ".tntp.zip" if upstream_path.endswith(".zip") else ".tntp"
+            destination = cache / f"{name}_{kind}{suffix}"
             if destination.exists():
                 data = destination.read_bytes()
             elif source_root is not None:
@@ -59,6 +82,8 @@ def prepare_data(cache: Path, datasets: list[str], source_root: Path | None) -> 
             if not destination.exists():
                 destination.write_bytes(data)
             manifest[name][kind] = {"upstream_path": upstream_path, "sha256": checksum}
+        if name == "Sydney":
+            manifest[name]["prepared"] = prepare_sydney(cache, manifest[name])
     return manifest
 
 
@@ -78,6 +103,7 @@ class NetworkInput:
     n_nodes: int
     links: np.ndarray
     demand: np.ndarray
+    details: dict = field(default_factory=dict)
 
     def build(self, capacities=None):
         import traffic_assignment as ta
@@ -98,16 +124,17 @@ class NetworkInput:
             "total_demand": float(self.demand.sum()),
             "intrazonal_demand": float(np.trace(self.demand)),
             "interzonal_demand": float(self.demand.sum() - np.trace(self.demand)),
+            "routing": "unrestricted transit",
+            **self.details,
         }
 
 
-def parse_tntp(name: str, network_text: str, trips_text: str) -> NetworkInput:
-    """Parse the study's travel-time-only networks without rounding demand."""
+def parse_network(name: str, network_text: str) -> tuple[int, int, np.ndarray]:
     meta, body = _metadata(network_text)
     zones, nodes, count = (int(meta[k]) for k in
                            ("NUMBER OF ZONES", "NUMBER OF NODES", "NUMBER OF LINKS"))
-    if int(meta["FIRST THRU NODE"]) != 1:
-        raise ValueError("This benchmark supports FIRST THRU NODE = 1 only")
+    # The study intentionally uses the existing all-nodes-transit solver model.
+    # FIRST THRU NODE is source metadata, not a routing constraint here.
     if not 0 < zones <= nodes or count <= 0:
         raise ValueError("Invalid TNTP dimensions")
     rows = [line.replace(";", " ").split() for line in body.splitlines() if line.strip()]
@@ -116,55 +143,169 @@ def parse_tntp(name: str, network_text: str, trips_text: str) -> NetworkInput:
     links = np.asarray(rows, dtype=float)
     if not np.all(np.isfinite(links)) or np.any(links < 0) or np.any(links[:, 2] <= 0):
         raise ValueError("TNTP link values must be finite, nonnegative, with positive capacities")
+    if name == "Sydney":
+        # Its final columns are critical_speed and lanes, not toll and link_type.
+        if not re.search(r"critical_speed\s+lanes", network_text):
+            raise ValueError("Unexpected Sydney network columns")
+        links[:, 8], links[:, 9] = 0, 1
     for col in (0, 1, 9):
         if np.any(links[:, col] != np.floor(links[:, col])):
             raise ValueError("Node IDs and link types must be integers")
     if np.any(links[:, :2] < 1) or np.any(links[:, :2] > nodes):
         raise ValueError("Link node ID outside declared range")
+    return zones, nodes, links
 
-    trip_meta, body = _metadata(trips_text)
+
+def parse_trips(stream, zones: int, *, truncate: bool = False,
+                allow_total_mismatch: bool = False) -> tuple[np.ndarray, dict]:
+    """Parse one line at a time; duplicate tracking uses one byte per OD."""
+    header = []
+    for line in stream:
+        header.append(line)
+        if "<END OF METADATA>" in line.upper():
+            break
+    trip_meta, trailing = _metadata("".join(header))
+    if trailing.strip():
+        raise ValueError("Demand metadata must end before entries")
     if int(trip_meta["NUMBER OF ZONES"]) != zones:
         raise ValueError("Network and demand zone counts differ")
     demand = np.zeros((zones, zones))
     tokens = re.compile(r"Origin\s+(\d+)|(\d+)\s*:\s*([+\-\d.eE]+)\s*;", re.IGNORECASE)
     origin = None
-    seen = set()
-    end = 0
-    for token in tokens.finditer(body):
-        if body[end:token.start()].strip():
+    seen = np.zeros((zones, zones), dtype=bool)
+    for line in stream:
+        body = line.split("~", 1)[0]
+        end = 0
+        for token in tokens.finditer(body):
+            if body[end:token.start()].strip():
+                raise ValueError("Malformed TNTP demand entry")
+            end = token.end()
+            if token[1] is not None:
+                origin = int(token[1]) - 1
+                if not 0 <= origin < zones:
+                    raise ValueError("Demand origin outside declared range")
+                continue
+            destination, value = int(token[2]) - 1, float(token[3])
+            if origin is None or not 0 <= destination < zones:
+                raise ValueError("Demand entry has no valid origin/destination")
+            if not math.isfinite(value) or value < 0:
+                raise ValueError("Demand must be finite and nonnegative")
+            if seen[origin, destination]:
+                raise ValueError("Duplicate demand entry")
+            seen[origin, destination] = True
+            demand[origin, destination] = value
+        if body[end:].strip():
             raise ValueError("Malformed TNTP demand entry")
-        end = token.end()
-        if token[1] is not None:
-            origin = int(token[1]) - 1
-            if not 0 <= origin < zones:
-                raise ValueError("Demand origin outside declared range")
-            continue
-        destination, value = int(token[2]) - 1, float(token[3])
-        if origin is None or not 0 <= destination < zones:
-            raise ValueError("Demand entry has no valid origin/destination")
-        if not math.isfinite(value) or value < 0:
-            raise ValueError("Demand must be finite and nonnegative")
-        if (origin, destination) in seen:
-            raise ValueError("Duplicate demand entry")
-        seen.add((origin, destination))
-        demand[origin, destination] = value
-    if body[end:].strip() or not seen:
-        raise ValueError("Malformed or empty TNTP demand")
-    if "TOTAL OD FLOW" in trip_meta and not math.isclose(
-        float(trip_meta["TOTAL OD FLOW"]), float(demand.sum()), rel_tol=1e-8, abs_tol=1e-6,
-    ):
+    if not seen.any():
+        raise ValueError("Empty TNTP demand")
+    actual = float(demand.sum())
+    declared = float(trip_meta["TOTAL OD FLOW"]) if "TOTAL OD FLOW" in trip_meta else None
+    if declared is not None and (not math.isfinite(declared) or declared < 0):
+        raise ValueError("Invalid TNTP TOTAL OD FLOW")
+    matches = declared is None or math.isclose(declared, actual, rel_tol=1e-8, abs_tol=1e-6)
+    if not matches and not allow_total_mismatch:
         raise ValueError("Demand sum differs from TNTP TOTAL OD FLOW")
-    return NetworkInput(name, nodes, links, demand)
+    if truncate:
+        np.floor(demand, out=demand)
+    return demand, {
+        "demand_variant": "CSV-compatible truncated demand" if truncate else "fractional source demand",
+        "declared_source_demand": declared, "actual_source_demand": actual,
+        "source_total_matches_header": matches,
+        "demand_transform": "floor each nonnegative OD entry" if truncate else "none",
+    }
+
+
+def parse_tntp(name: str, network_text: str, trips_text: str) -> NetworkInput:
+    """Parse unrestricted, travel-time-only inputs, preserving fractional demand."""
+    zones, nodes, links = parse_network(name, network_text)
+    demand, details = parse_trips(io.StringIO(trips_text), zones)
+    return NetworkInput(name, nodes, links, demand, details)
+
+
+def prepare_sydney(cache: Path, sources: dict) -> dict:
+    """Prepare the checksum-pinned legacy workload once, outside worker timing."""
+    prepared = cache / "Sydney_prepared.npz"
+    metadata = cache / "Sydney_prepared.json"
+    if prepared.exists() or metadata.exists():
+        if not (prepared.exists() and metadata.exists()):
+            raise ValueError("Incomplete Sydney prepared cache; remove Sydney_prepared.* and retry")
+        info = json.loads(metadata.read_text())
+        if (info["preparation_version"] != PREPARATION_VERSION or info["sources"] != sources
+                or sha256(prepared.read_bytes()) != info["sha256"]):
+            raise ValueError("Sydney prepared cache mismatch; remove Sydney_prepared.* and retry")
+        return info
+    zones, nodes, links = parse_network("Sydney", (cache / "Sydney_net.tntp").read_text())
+    with ZipFile(cache / "Sydney_trips.tntp.zip") as archive:
+        if archive.namelist().count(SYDNEY_MEMBER) != 1:
+            raise ValueError("Sydney archive must contain exactly one demand member")
+        with archive.open(SYDNEY_MEMBER) as member:
+            digest = hashlib.file_digest(member, "sha256").hexdigest()
+        if digest != SYDNEY_MEMBER_SHA256:
+            raise ValueError("Sydney demand member checksum mismatch")
+        # The source checksum above narrowly authorizes this known header mismatch.
+        with archive.open(SYDNEY_MEMBER) as member:
+            demand, details = parse_trips(io.TextIOWrapper(member), zones,
+                                          truncate=True, allow_total_mismatch=True)
+    if array_sha256(demand) != SYDNEY_DEMAND_SHA256:
+        raise ValueError("Prepared Sydney demand differs from the verified legacy CSV workload")
+    details["network_mapping"] = "first eight source columns; toll=0, link_type=1"
+    np.savez_compressed(prepared, n_nodes=nodes, links=links, demand=demand)
+    info = {
+        "preparation_version": PREPARATION_VERSION, "sources": sources.copy(),
+        "archive_member": SYDNEY_MEMBER, "member_sha256": digest,
+        "sha256": sha256(prepared.read_bytes()), "demand_sha256": array_sha256(demand),
+        "links_sha256": array_sha256(links), "details": details,
+    }
+    metadata.write_text(json.dumps(info, indent=2) + "\n")
+    return info
 
 
 def load_input(cache: Path, name: str) -> NetworkInput:
+    if name == "Sydney":
+        info = json.loads((cache / "Sydney_prepared.json").read_text())
+        prepared = cache / "Sydney_prepared.npz"
+        if sha256(prepared.read_bytes()) != info["sha256"]:
+            raise ValueError("Sydney prepared cache checksum mismatch")
+        with np.load(prepared, allow_pickle=False) as arrays:
+            links, demand = arrays["links"], arrays["demand"]
+            if (array_sha256(demand) != SYDNEY_DEMAND_SHA256
+                    or array_sha256(links) != info["links_sha256"]):
+                raise ValueError("Sydney prepared array checksum mismatch")
+            return NetworkInput(name, int(arrays["n_nodes"]), links, demand, info["details"])
     return parse_tntp(name, (cache / f"{name}_net.tntp").read_text(),
                       (cache / f"{name}_trips.tntp").read_text())
 
 
+def shortest_path_total(data: NetworkInput, costs, batch_size: int = 64) -> tuple[float, int]:
+    """Independent directed shortest paths, with bounded distance-matrix memory."""
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import dijkstra
+
+    # CSR construction sums duplicates. Collapse parallel links by MIN instead.
+    edges = {}
+    for (u, v), cost in zip(data.links[:, :2].astype(int) - 1, costs):
+        key = (int(u), int(v))
+        edges[key] = min(float(cost), edges.get(key, math.inf))
+    rows, columns = zip(*edges) if edges else ([], [])
+    graph = csr_matrix((list(edges.values()), (rows, columns)), shape=(data.n_nodes, data.n_nodes))
+    # Explicit sparse zeros represent real zero-cost links; do not eliminate them.
+    origins = np.flatnonzero(data.demand.sum(axis=1))
+    shortest_total, unreachable = 0.0, 0
+    for start in range(0, len(origins), batch_size):
+        batch = origins[start:start + batch_size]
+        distances = dijkstra(graph, directed=True, indices=batch, return_predecessors=False)
+        for i, origin in enumerate(batch):
+            destinations = np.flatnonzero(data.demand[origin])
+            lengths = distances[i, destinations]
+            finite = np.isfinite(lengths)
+            unreachable += int(np.count_nonzero(~finite))
+            shortest_total += float(np.dot(data.demand[origin, destinations[finite]], lengths[finite]))
+    return shortest_total, unreachable
+
+
 def validate_assignment(data: NetworkInput, flows, costs, capacities, reported_tstt,
                         reported_gap, tolerance: float) -> dict:
-    """Check feasibility and recompute the equilibrium gap with Python Dijkstra."""
+    """Check feasibility and recompute the equilibrium gap independently with SciPy."""
     flows, costs, capacities = (np.asarray(a, dtype=float) for a in (flows, costs, capacities))
     errors = []
     if any(a.shape != (len(data.links),) for a in (flows, costs, capacities)):
@@ -190,29 +331,7 @@ def validate_assignment(data: NetworkInput, flows, costs, capacities, reported_t
     residual = float(np.max(np.abs(balance - expected)))
     if not np.allclose(balance, expected, rtol=1e-9, atol=1e-6):
         errors.append("node flow conservation")
-    adjacency = [[] for _ in range(data.n_nodes)]
-    for u, v, cost in zip(init, term, bpr):
-        adjacency[u].append((int(v), float(cost)))
-    shortest_total = 0.0
-    unreachable = 0
-    for origin in np.flatnonzero(data.demand.sum(axis=1)):
-        distances = [math.inf] * data.n_nodes
-        distances[origin] = 0.0
-        queue = [(0.0, int(origin))]
-        while queue:
-            distance, node = heapq.heappop(queue)
-            if distance > distances[node]:
-                continue
-            for dest, cost in adjacency[node]:
-                candidate = distance + cost
-                if candidate < distances[dest]:
-                    distances[dest] = candidate
-                    heapq.heappush(queue, (candidate, dest))
-        for dest in np.flatnonzero(data.demand[origin]):
-            if not math.isfinite(distances[dest]):
-                unreachable += 1
-            else:
-                shortest_total += data.demand[origin, dest] * distances[dest]
+    shortest_total, unreachable = shortest_path_total(data, bpr)
     if unreachable:
         errors.append("unreachable demand")
     gap = 1 - shortest_total / tstt if tstt > 0 else math.inf

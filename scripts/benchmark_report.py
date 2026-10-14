@@ -32,10 +32,13 @@ def summarize(cases: list[dict], records: list[dict]) -> list[dict]:
         row["max_budget_violation"] = max((r.get("budget_violation", 0) for r in good), default=None)
         row["max_bound_violation"] = max((r.get("bound_violation", 0) for r in good), default=None)
         summary.append(row)
-    scaling = [s for s in summary if s["kind"] == "tap" and s["dataset"] == "ChicagoSketch"
-               and s["approach"] == "routebased" and s["tolerance"] == 1e-8]
-    reference = next((s for s in scaling if s["threads"] == 1), None)
+    def group(row):
+        return row["dataset"], row["approach"], row["tolerance"]
+
+    scaling_groups = {group(s) for s in summary if s["kind"] == "tap" and s["threads"] > 1}
+    scaling = [s for s in summary if s["kind"] == "tap" and group(s) in scaling_groups]
     for row in scaling:
+        reference = next((s for s in scaling if group(s) == group(row) and s["threads"] == 1), None)
         consistent = bool(reference and reference["all_valid"] and row["all_valid"])
         if consistent:
             ref_records = [r for r in records if r["case_id"] == reference["id"]
@@ -54,6 +57,15 @@ def summarize(cases: list[dict], records: list[dict]) -> list[dict]:
 
 def number(value, spec=".4f") -> str:
     return format(value, spec) if value is not None else "—"
+
+
+def dataset_title(name: str) -> str:
+    return {
+        "ChicagoSketch": "Chicago Sketch\nTravel-time-only",
+        "Anaheim": "Anaheim\nUnrestricted transit; fractional demand",
+        "Sydney": "Sydney\nUnrestricted transit; CSV-compatible truncated demand",
+        "SiouxFalls": "Sioux Falls",
+    }.get(name, name)
 
 
 def write_csv(path: Path, rows: list[dict]):
@@ -87,8 +99,12 @@ def plots(output: Path, summary: list[dict]):
     tap = [s for s in summary if s["kind"] == "tap" and s["threads"] == 1]
     datasets = list(dict.fromkeys(s["dataset"] for s in tap))
     if datasets:
-        fig, axes = plt.subplots(1, len(datasets), figsize=(6 * len(datasets), 4.3), squeeze=False)
-        for ax, dataset in zip(axes[0], datasets):
+        columns = min(2, len(datasets))
+        rows = math.ceil(len(datasets) / columns)
+        fig, axes = plt.subplots(rows, columns, figsize=(6 * columns, 4.3 * rows), squeeze=False)
+        for ax in axes.flat[len(datasets):]:
+            ax.set_visible(False)
+        for ax, dataset in zip(axes.flat, datasets):
             for approach, label, color in (("tapas", "TAPAS", "#2166ac"),
                                             ("routebased", "Route-based", "#d6604d")):
                 rows = sorted((s for s in tap if s["dataset"] == dataset and
@@ -105,31 +121,37 @@ def plots(output: Path, summary: list[dict]):
             ax.invert_xaxis()
             ax.set_yscale("log")
             ax.set(xlabel="Requested relative gap", ylabel="Native solve time (s)",
-                   title=dataset + ("\nTravel-time-only" if dataset == "ChicagoSketch" else ""))
+                   title=dataset_title(dataset))
             ax.grid(alpha=0.2)
             if ax.lines:
                 ax.legend()
+            else:
+                ax.text(0.5, 0.5, "No fully validated configurations", transform=ax.transAxes, ha="center")
         fig.suptitle("Assignment runtime at matched accuracy targets\nMedian and interquartile range; validated configurations", fontsize=12)
         fig.tight_layout()
         save(fig, "assignment_runtime")
 
-    scaling = sorted((s for s in summary if "speedup" in s), key=lambda s: s["threads"])
+    scaling = sorted((s for s in summary if "speedup" in s), key=lambda s: (s["dataset"], s["threads"]))
     if scaling:
-        fig, ax = plt.subplots(figsize=(7, 4.4))
-        valid = [s for s in scaling if s["speedup"] is not None]
-        if valid:
-            ax.plot([s["threads"] for s in valid], [s["speedup"] for s in valid],
-                    "o-", color="#2166ac", label="Measured whole-solve speedup")
-            for s in valid:
-                ax.annotate(f"{s['speedup']:.2f}×", (s["threads"], s["speedup"]),
-                            xytext=(0, 9), textcoords="offset points", ha="center")
-        ax.axhline(1, color="#777777", linestyle="--", linewidth=1, label="Serial baseline")
-        ax.set(xticks=[s["threads"] for s in scaling], xlabel="Route-search threads",
-               ylabel="Serial median / parallel median",
-               title="Chicago Sketch: parallel route search\nTravel-time-only; relative-gap target 1e-8")
-        ax.set_ylim(bottom=0)
-        ax.grid(alpha=0.2)
-        ax.legend(loc="best")
+        datasets = list(dict.fromkeys(s["dataset"] for s in scaling))
+        fig, axes = plt.subplots(len(datasets), 1, figsize=(8, 4 * len(datasets)), squeeze=False)
+        for ax, dataset in zip(axes.flat, datasets):
+            rows = [s for s in scaling if s["dataset"] == dataset]
+            valid = [s for s in rows if s["speedup"] is not None]
+            if valid:
+                ax.plot([s["threads"] for s in valid], [s["speedup"] for s in valid],
+                        "o-", color="#2166ac", label="Measured whole-solve speedup")
+                for s in valid:
+                    ax.annotate(f"{s['speedup']:.2f}×", (s["threads"], s["speedup"]),
+                                xytext=(0, 9), textcoords="offset points", ha="center")
+            ax.axhline(1, color="#777777", linestyle="--", linewidth=1, label="Serial baseline")
+            ax.set(xticks=[s["threads"] for s in rows], xlabel="Route-search threads",
+                   ylabel="Serial median / parallel median", title=dataset_title(dataset))
+            ax.set_ylim(bottom=0)
+            ax.margins(y=0.2)
+            ax.grid(alpha=0.2)
+            ax.legend(loc="best")
+        fig.suptitle("Parallel route search: whole-solve speedup\nRoute-based assignment; relative-gap target 1e-8", fontsize=12)
         fig.tight_layout()
         save(fig, "parallel_scaling")
 
@@ -169,7 +191,7 @@ def render(output: Path):
         "requested accuracy. Results apply to this machine and build. "
         "External solver comparisons and global CNDP optimality are outside this study.", "",
         "## Inputs and model", "",
-        "| Dataset | Nodes | Links | Interzonal OD pairs | Source demand | Road-network demand |",
+        "| Dataset | Nodes | Links | Interzonal OD pairs | Modeled demand | Road-network demand |",
         "| --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for name, d in manifest["datasets"].items():
@@ -179,13 +201,36 @@ def render(output: Path):
         "", "Source: [Transportation Networks for Research]"
         f"({manifest['data_repository']}/tree/{manifest['data_revision']}). "
         "Exact revision and input checksums are in [manifest.json](manifest.json). "
-        "Fractional demand is preserved. Intrazonal trips remain in the input as zero-link "
+        "Fractional demand is preserved except for the explicitly identified Sydney variant. "
+        "Intrazonal trips remain in the input as zero-link "
         "trips; they contribute no road flow or travel time. Road-network demand excludes them.", "",
         "The selected networks use BPR travel-time costs and allow transit through every node. "
         "**Chicago Sketch is a travel-time-only variant**: toll and distance terms from "
         "the published generalized-cost reference are excluded, so its published reference "
         "objective does not apply here. Sioux Falls is a small research/debugging "
         "benchmark. Travel-time totals retain native dataset units.", "",
+    ])
+    if "Anaheim" in manifest["datasets"]:
+        lines.extend(["**Anaheim uses unrestricted transit and fractional source demand.** "
+                      "This project-specific variant allows intermediate zone nodes; published "
+                      "reference objectives for restricted routing do not apply.", ""])
+    if "Sydney" in manifest["datasets"]:
+        d = manifest["datasets"]["Sydney"]
+        lines.extend([
+            "**Sydney uses unrestricted transit and CSV-compatible truncated demand.** "
+            "Every nonnegative source OD value is rounded down, reproducing the existing "
+            "CSV-based `scripts/run_experiment.py tap --dataset Sydney` workload. "
+            "The study measures native solve time with statistics disabled, so timings "
+            "are not directly comparable to that command's elapsed time. "
+            "Source critical-speed and lane columns are not interpreted as tolls or link types.", "",
+            f"Sydney's source header declares {number(d.get('declared_source_demand'), ',.0f')} "
+            f"trips; its entries sum to {number(d.get('actual_source_demand'), ',.6f')}. "
+            f"The modeled total after truncation is {d['total_demand']:,.0f}, including "
+            f"{d['intrazonal_demand']:,.0f} intrazonal trips. No demand rescaling is applied. "
+            "The known header discrepancy is accepted only for the checksum-verified source. "
+            "Results describe this modified workload, not the original full-demand reference case.", "",
+        ])
+    lines.extend([
         "## Assignment accuracy and runtime", "",
         "Times are medians with 25th–75th percentiles, in seconds. Statistics use successful "
         "measured runs; the count exposes incomplete configurations. Warm-ups are excluded.", "",
@@ -201,19 +246,21 @@ def render(output: Path):
                 f"{number(s['max_relative_gap'], '.2e')} |")
     if "assignment_runtime" in figures:
         lines.extend(["", "![Runtime at matched accuracy](figures/assignment_runtime.svg)"])
-    scaling = sorted((s for s in summary if "speedup" in s), key=lambda s: s["threads"])
+    scaling = sorted((s for s in summary if "speedup" in s), key=lambda s: (s["dataset"], s["threads"]))
     if scaling:
         lines.extend(["", "## Parallel route-search scaling", "",
-                      "Chicago Sketch, route-based solver, target relative gap 1e-8. "
+                      "Route-based solver, target relative gap 1e-8, with a separate serial "
+                      "baseline for each network. "
                       "Speedup measures the entire solve: flow redistribution remains sequential. "
                       "Speedups below 1 indicate a slowdown. Only fully validated configurations "
                       "with matching travel-time and Beckmann objectives receive a speedup.", "",
-                      "| Threads | Successful runs | Median [Q25, Q75] (s) | Speedup |",
-                      "| ---: | ---: | ---: | ---: |"])
+                      "| Dataset | Threads | Successful runs | Median [Q25, Q75] (s) | Speedup |",
+                      "| --- | ---: | ---: | ---: | ---: |"])
         for s in scaling:
-            lines.append(f"| {s['threads']} | {s['successful_runs']}/{s['expected_runs']} | "
+            speedup = f"{s['speedup']:.2f}×" if s['speedup'] is not None else "—"
+            lines.append(f"| {s['dataset']} | {s['threads']} | {s['successful_runs']}/{s['expected_runs']} | "
                          f"{number(s['solve_seconds'])} [{number(s['q25_seconds'])}, "
-                         f"{number(s['q75_seconds'])}] | {number(s['speedup'], '.2f')}× |")
+                         f"{number(s['q75_seconds'])}] | {speedup} |")
         lines.extend(["", "![Parallel scaling](figures/parallel_scaling.svg)"])
     cndp = next(s for s in summary if s["kind"] == "cndp")
     config = next(s for s in manifest["configuration"] if s["kind"] == "cndp")
@@ -251,13 +298,16 @@ def render(output: Path):
                   "Repeated runs measure timing variability, rather than variation across seeds.",
                   "- Independent Python checks cover finite/nonnegative flows, node conservation, "
                   "BPR link costs, total travel time, and a Dijkstra-based equilibrium gap. "
+                  f"Backend: {manifest.get('validation_backend', 'Python heap-based Dijkstra')}. "
                   "Gap validation allows an absolute 1e-12 roundoff margin.",
                   "- CNDP also checks capacity bounds, investment accounting, and a fresh final "
                   "equilibrium. Budget tolerance is 1e-6 and bound tolerance is 1e-7. "
                   "Fresh and warm-started travel times must agree within 1e-5 relative tolerance.",
-                  "- TAP has a 1000-iteration ceiling. Worker limits are 120 seconds for TAP "
-                  "and 300 seconds for CNDP, including validation. The full run has a "
-                  "3600-second default deadline. Errors, timeouts, and unrun cases remain in raw results.",
+                  "- TAP has a 1000-iteration ceiling. Worker limits, including validation: "
+                  + ", ".join(f"{name} TAP {max(c['timeout'] for c in manifest['configuration'] if c['dataset'] == name and c['kind'] == 'tap')}s"
+                              for name in manifest['datasets'])
+                  + f"; CNDP {config['timeout']}s. This run's worker budget is "
+                  f"{manifest['time_budget_seconds']:g}s. Errors, timeouts, and unrun cases remain in raw results.",
                   "- Measurements follow the capacity-dependent derivative-cache correction. "
                   "CNDP results describe simulated outcomes under the specified model.", "",
                   "## Machine and build", "",
@@ -266,7 +316,11 @@ def render(output: Path):
                   f"- Compiler: {manifest['build'].get('compiler_version', 'unavailable')}.",
                   f"- Build: {manifest['build'].get('CMAKE_BUILD_TYPE')}; "
                   f"release flags: {manifest['build'].get('CMAKE_CXX_FLAGS_RELEASE', '')}.",
-                  f"- Python: {manifest['python']}; NumPy: {manifest['packages'].get('numpy')}.",
+                  f"- Python: {manifest['python']}; NumPy: {manifest['packages'].get('numpy')}; "
+                  f"SciPy: {manifest['packages'].get('scipy', 'not used')}.",
+                  "- Numerical-library thread environment: "
+                  + (", ".join(f"{key}={value}" for key, value in manifest.get('numerical_thread_environment', {}).items()) or "not recorded")
+                  + ". Native route-search thread counts are configured separately.",
                   f"- Git base: {manifest['git_commit']}; uncommitted changes present: "
                   f"{str(manifest['working_tree_dirty']).lower()}.",
                   f"- Source fingerprint: {manifest['source_sha256']}.",
@@ -276,16 +330,17 @@ def render(output: Path):
                   "## Reproduce", "",
                   "From the repository root, after installing the native prerequisites in the main README:", "",
                   chr(96) * 3 + "bash",
-                  "python -m pip install -e '.[examples,test]' -Ccmake.build-type=Release",
+                  "python -m pip install -e '.[benchmarks,test]' -Ccmake.build-type=Release",
                   f"python scripts/run_benchmarks.py --profile {manifest['profile']} \\",
-                  "  --time-budget 3600 --output performance_results/benchmark-reproduction",
+                  f"  --time-budget {manifest['time_budget_seconds']:g} --output performance_results/benchmark-reproduction",
                   "python scripts/run_benchmarks.py \\",
                   "  --render-only performance_results/benchmark-reproduction",
                   chr(96) * 3, "",
                   "The runner downloads only the pinned TNTP inputs into build/benchmark-data. "
                   "For offline preparation, add --source-root data/TransportationNetworks "
                   "with a Git clone containing the pinned revision; it reads committed blobs "
-                  "and ignores local dataset edits. Existing run directories are protected from overwrite.", "",
+                  "and ignores local dataset edits. Sydney's ZIP demand is streamed and converted once "
+                  "into a checked array cache. Existing run directories are protected from overwrite.", "",
                   "A short installation check uses --profile quick. Regenerating reports needs "
                   "the plotting dependencies but does not execute solvers.", "",
                   "## Evidence", "",

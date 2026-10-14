@@ -15,6 +15,14 @@ import subprocess
 import sys
 import time
 
+# Set before importing NumPy/SciPy, including in fresh workers. Native route
+# search uses its own explicit thread count and is unaffected by these pools.
+NUMERICAL_THREAD_ENV = {name: "1" for name in (
+    "OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS",
+    "BLIS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS",
+)}
+os.environ.update(NUMERICAL_THREAD_ENV)
+
 import numpy as np
 
 from benchmark_data import (
@@ -27,7 +35,7 @@ BUILD_SETTINGS = ("CMAKE_BUILD_TYPE", "CMAKE_CXX_COMPILER", "CMAKE_CXX_FLAGS",
 
 
 def configurations(profile: str) -> list[dict]:
-    datasets = ["SiouxFalls"] if profile == "quick" else ["SiouxFalls", "ChicagoSketch"]
+    datasets = ["SiouxFalls"] if profile == "quick" else ["SiouxFalls", "ChicagoSketch", "Anaheim", "Sydney"]
     tolerances = [1e-8] if profile == "quick" else [1e-6, 1e-8, 1e-10]
     cases = []
     for dataset in datasets:
@@ -37,15 +45,17 @@ def configurations(profile: str) -> list[dict]:
                     id=f"{dataset}_{approach}_{tolerance:.0e}_t1",
                     kind="tap", dataset=dataset, approach=approach, tolerance=tolerance,
                     threads=1, max_iterations=1000, repeats=1 if profile == "quick" else 5,
-                    timeout=120,
+                    timeout=600 if dataset == "Sydney" else 120,
                 ))
     if profile == "full":
-        for threads in (2, 4, 8):
-            cases.append(dict(
-                id=f"ChicagoSketch_routebased_1e-08_t{threads}",
-                kind="tap", dataset="ChicagoSketch", approach="routebased",
-                tolerance=1e-8, threads=threads, max_iterations=1000, repeats=5, timeout=120,
-            ))
+        for dataset in ("ChicagoSketch", "Anaheim", "Sydney"):
+            for threads in (2, 4, 8):
+                cases.append(dict(
+                    id=f"{dataset}_routebased_1e-08_t{threads}",
+                    kind="tap", dataset=dataset, approach="routebased",
+                    tolerance=1e-8, threads=threads, max_iterations=1000, repeats=5,
+                    timeout=600 if dataset == "Sydney" else 120,
+                ))
     cases.append(dict(
         id="SiouxFalls_cndp_cobyla", kind="cndp", dataset="SiouxFalls", approach="tapas",
         tolerance=1e-8, threads=1, max_iterations=1000,
@@ -256,7 +266,7 @@ def provenance() -> dict:
         cpu = next((line.split(":", 1)[1].strip() for line in cpuinfo.read_text().splitlines()
                     if line.startswith("model name")), cpu)
     packages = {}
-    for name in ("traffic-assignment", "numpy", "pandas", "matplotlib", "pybind11", "scikit-build-core"):
+    for name in ("traffic-assignment", "numpy", "scipy", "pandas", "matplotlib", "pybind11", "scikit-build-core"):
         try:
             packages[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
@@ -269,6 +279,7 @@ def provenance() -> dict:
         "available_cpus": len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count(),
         "python": platform.python_version(), "packages": packages,
         "build": build_metadata(), "tapas_seed": 42,
+        "numerical_thread_environment": NUMERICAL_THREAD_ENV,
     }
 
 
@@ -278,8 +289,8 @@ def main() -> int:
     parser.add_argument("--source-root", type=Path,
                         help="TransportationNetworks Git clone containing the pinned revision")
     parser.add_argument("--output", type=Path, help="New run directory (existing runs are preserved)")
-    parser.add_argument("--time-budget", type=float, default=3600,
-                        help="Maximum seconds for workers including warm-ups and validation")
+    parser.add_argument("--time-budget", type=float,
+                        help="Worker budget including warm-ups and validation (full: 14400s; quick: 3600s)")
     parser.add_argument("--render-only", type=Path, metavar="RUN_DIR",
                         help="Regenerate summary, report, and figures without running solvers")
     parser.add_argument("--worker", help=argparse.SUPPRESS)
@@ -293,6 +304,8 @@ def main() -> int:
     if args.render_only:
         render(args.render_only.resolve())
         return 0
+    if args.time_budget is None:
+        args.time_budget = 14400 if args.profile == "full" else 3600
     if not math.isfinite(args.time_budget) or args.time_budget <= 0:
         parser.error("--time-budget must be finite and positive")
     output = (args.output or ROOT / "performance_results/benchmarks" /
@@ -309,11 +322,12 @@ def main() -> int:
         parser.error("Benchmarks require a local Release build; install with -Ccmake.build-type=Release")
     output.mkdir(parents=True, exist_ok=True)
     manifest = {
-        "schema_version": 1, "started_utc": datetime.now(timezone.utc).isoformat(),
+        "schema_version": 2, "started_utc": datetime.now(timezone.utc).isoformat(),
         "profile": args.profile, "time_budget_seconds": args.time_budget,
         "data_repository": DATA_REPOSITORY, "data_revision": DATA_REVISION, "data_files": sources,
         "datasets": {name: load_input(cache, name).dimensions() for name in datasets},
-        "model": "BPR travel-time-only; no toll or distance cost; FIRST THRU NODE = 1",
+        "model": "BPR travel-time-only; no toll or distance cost; unrestricted transit through all nodes",
+        "validation_backend": "SciPy directed Dijkstra; 64 origins per batch; minimum parallel-link cost",
         "timing": "Native computation; excludes loading, construction, validation and plotting",
         "configuration": cases, **info,
     }

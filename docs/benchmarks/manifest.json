@@ -1,8 +1,8 @@
 {
-  "schema_version": 1,
-  "started_utc": "2026-10-13T17:53:56.932021+00:00",
+  "schema_version": 2,
+  "started_utc": "2026-10-13T18:41:59.049976+00:00",
   "profile": "full",
-  "time_budget_seconds": 3600.0,
+  "time_budget_seconds": 14400,
   "data_repository": "https://github.com/bstabler/TransportationNetworks",
   "data_revision": "375e0da93858c547230c5cf9ea8a96de4ccff29e",
   "data_files": {
@@ -25,6 +25,52 @@
         "upstream_path": "Chicago-Sketch/ChicagoSketch_trips.tntp",
         "sha256": "efe68abffc4af09e344cf1e175cfc048c08f4cd8f1f5454f74371b40e8245edc"
       }
+    },
+    "Anaheim": {
+      "net": {
+        "upstream_path": "Anaheim/Anaheim_net.tntp",
+        "sha256": "99933b415e9500b13907829c37a43cfa9141714fad5af279081e28e5f9356f9a"
+      },
+      "trips": {
+        "upstream_path": "Anaheim/Anaheim_trips.tntp",
+        "sha256": "906893854cd0db4479c0b5f07678ce5616fa8e42e2b997f918c378309c66a94e"
+      }
+    },
+    "Sydney": {
+      "net": {
+        "upstream_path": "Sydney/Sydney_net.tntp",
+        "sha256": "cf7162f01eb9518b246e7a761f7bb02b3c154577f9a4514fed419fd957c08923"
+      },
+      "trips": {
+        "upstream_path": "Sydney/Sydney_trips.tntp.zip",
+        "sha256": "85acc191d27c7c36c60d86d4f00f5c177caf01b799ca8add355e153b91a1ac33"
+      },
+      "prepared": {
+        "preparation_version": 1,
+        "sources": {
+          "net": {
+            "upstream_path": "Sydney/Sydney_net.tntp",
+            "sha256": "cf7162f01eb9518b246e7a761f7bb02b3c154577f9a4514fed419fd957c08923"
+          },
+          "trips": {
+            "upstream_path": "Sydney/Sydney_trips.tntp.zip",
+            "sha256": "85acc191d27c7c36c60d86d4f00f5c177caf01b799ca8add355e153b91a1ac33"
+          }
+        },
+        "archive_member": "Sydney_trips.tntp",
+        "member_sha256": "6f98db94972c535ec0590ac911ccdc816d9db63f81705ac73593bbbe9afda735",
+        "sha256": "5bfa217c4fed99d047b4e25c39e32049891c703bf564b9298f9f99a9cd77eca5",
+        "demand_sha256": "eee076405349109bcfea762e24a8478dc8b272c6c6d8fd9ec0e45dd99bca9778",
+        "links_sha256": "78e6f9609006f2db37c49faeb5f5635f7360d4099d28ab02a66d0682a3829b01",
+        "details": {
+          "demand_variant": "CSV-compatible truncated demand",
+          "declared_source_demand": 849339.0,
+          "actual_source_demand": 854772.1259999999,
+          "source_total_matches_header": false,
+          "demand_transform": "floor each nonnegative OD entry",
+          "network_mapping": "first eight source columns; toll=0, link_type=1"
+        }
+      }
     }
   },
   "datasets": {
@@ -37,7 +83,13 @@
       "active_origins": 24,
       "total_demand": 360600.0,
       "intrazonal_demand": 0.0,
-      "interzonal_demand": 360600.0
+      "interzonal_demand": 360600.0,
+      "routing": "unrestricted transit",
+      "demand_variant": "fractional source demand",
+      "declared_source_demand": 360600.0,
+      "actual_source_demand": 360600.0,
+      "source_total_matches_header": true,
+      "demand_transform": "none"
     },
     "ChicagoSketch": {
       "nodes": 933,
@@ -48,10 +100,52 @@
       "active_origins": 386,
       "total_demand": 1260907.44,
       "intrazonal_demand": 123414.0,
-      "interzonal_demand": 1137493.44
+      "interzonal_demand": 1137493.44,
+      "routing": "unrestricted transit",
+      "demand_variant": "fractional source demand",
+      "declared_source_demand": 1260907.4400005303,
+      "actual_source_demand": 1260907.44,
+      "source_total_matches_header": true,
+      "demand_transform": "none"
+    },
+    "Anaheim": {
+      "nodes": 416,
+      "links": 914,
+      "zones": 38,
+      "positive_od_pairs": 1406,
+      "interzonal_od_pairs": 1406,
+      "active_origins": 38,
+      "total_demand": 104694.40000000001,
+      "intrazonal_demand": 0.0,
+      "interzonal_demand": 104694.40000000001,
+      "routing": "unrestricted transit",
+      "demand_variant": "fractional source demand",
+      "declared_source_demand": 104694.4,
+      "actual_source_demand": 104694.40000000001,
+      "source_total_matches_header": true,
+      "demand_transform": "none"
+    },
+    "Sydney": {
+      "nodes": 33113,
+      "links": 75379,
+      "zones": 3264,
+      "positive_od_pairs": 125275,
+      "interzonal_od_pairs": 123370,
+      "active_origins": 2508,
+      "total_demand": 480515.0,
+      "intrazonal_demand": 68566.0,
+      "interzonal_demand": 411949.0,
+      "routing": "unrestricted transit",
+      "demand_variant": "CSV-compatible truncated demand",
+      "declared_source_demand": 849339.0,
+      "actual_source_demand": 854772.1259999999,
+      "source_total_matches_header": false,
+      "demand_transform": "floor each nonnegative OD entry",
+      "network_mapping": "first eight source columns; toll=0, link_type=1"
     }
   },
-  "model": "BPR travel-time-only; no toll or distance cost; FIRST THRU NODE = 1",
+  "model": "BPR travel-time-only; no toll or distance cost; unrestricted transit through all nodes",
+  "validation_backend": "SciPy directed Dijkstra; 64 origins per batch; minimum parallel-link cost",
   "timing": "Native computation; excludes loading, construction, validation and plotting",
   "configuration": [
     {
@@ -187,6 +281,138 @@
       "timeout": 120
     },
     {
+      "id": "Anaheim_tapas_1e-06_t1",
+      "kind": "tap",
+      "dataset": "Anaheim",
+      "approach": "tapas",
+      "tolerance": 1e-06,
+      "threads": 1,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 120
+    },
+    {
+      "id": "Anaheim_routebased_1e-06_t1",
+      "kind": "tap",
+      "dataset": "Anaheim",
+      "approach": "routebased",
+      "tolerance": 1e-06,
+      "threads": 1,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 120
+    },
+    {
+      "id": "Anaheim_tapas_1e-08_t1",
+      "kind": "tap",
+      "dataset": "Anaheim",
+      "approach": "tapas",
+      "tolerance": 1e-08,
+      "threads": 1,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 120
+    },
+    {
+      "id": "Anaheim_routebased_1e-08_t1",
+      "kind": "tap",
+      "dataset": "Anaheim",
+      "approach": "routebased",
+      "tolerance": 1e-08,
+      "threads": 1,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 120
+    },
+    {
+      "id": "Anaheim_tapas_1e-10_t1",
+      "kind": "tap",
+      "dataset": "Anaheim",
+      "approach": "tapas",
+      "tolerance": 1e-10,
+      "threads": 1,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 120
+    },
+    {
+      "id": "Anaheim_routebased_1e-10_t1",
+      "kind": "tap",
+      "dataset": "Anaheim",
+      "approach": "routebased",
+      "tolerance": 1e-10,
+      "threads": 1,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 120
+    },
+    {
+      "id": "Sydney_tapas_1e-06_t1",
+      "kind": "tap",
+      "dataset": "Sydney",
+      "approach": "tapas",
+      "tolerance": 1e-06,
+      "threads": 1,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 600
+    },
+    {
+      "id": "Sydney_routebased_1e-06_t1",
+      "kind": "tap",
+      "dataset": "Sydney",
+      "approach": "routebased",
+      "tolerance": 1e-06,
+      "threads": 1,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 600
+    },
+    {
+      "id": "Sydney_tapas_1e-08_t1",
+      "kind": "tap",
+      "dataset": "Sydney",
+      "approach": "tapas",
+      "tolerance": 1e-08,
+      "threads": 1,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 600
+    },
+    {
+      "id": "Sydney_routebased_1e-08_t1",
+      "kind": "tap",
+      "dataset": "Sydney",
+      "approach": "routebased",
+      "tolerance": 1e-08,
+      "threads": 1,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 600
+    },
+    {
+      "id": "Sydney_tapas_1e-10_t1",
+      "kind": "tap",
+      "dataset": "Sydney",
+      "approach": "tapas",
+      "tolerance": 1e-10,
+      "threads": 1,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 600
+    },
+    {
+      "id": "Sydney_routebased_1e-10_t1",
+      "kind": "tap",
+      "dataset": "Sydney",
+      "approach": "routebased",
+      "tolerance": 1e-10,
+      "threads": 1,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 600
+    },
+    {
       "id": "ChicagoSketch_routebased_1e-08_t2",
       "kind": "tap",
       "dataset": "ChicagoSketch",
@@ -220,6 +446,72 @@
       "timeout": 120
     },
     {
+      "id": "Anaheim_routebased_1e-08_t2",
+      "kind": "tap",
+      "dataset": "Anaheim",
+      "approach": "routebased",
+      "tolerance": 1e-08,
+      "threads": 2,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 120
+    },
+    {
+      "id": "Anaheim_routebased_1e-08_t4",
+      "kind": "tap",
+      "dataset": "Anaheim",
+      "approach": "routebased",
+      "tolerance": 1e-08,
+      "threads": 4,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 120
+    },
+    {
+      "id": "Anaheim_routebased_1e-08_t8",
+      "kind": "tap",
+      "dataset": "Anaheim",
+      "approach": "routebased",
+      "tolerance": 1e-08,
+      "threads": 8,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 120
+    },
+    {
+      "id": "Sydney_routebased_1e-08_t2",
+      "kind": "tap",
+      "dataset": "Sydney",
+      "approach": "routebased",
+      "tolerance": 1e-08,
+      "threads": 2,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 600
+    },
+    {
+      "id": "Sydney_routebased_1e-08_t4",
+      "kind": "tap",
+      "dataset": "Sydney",
+      "approach": "routebased",
+      "tolerance": 1e-08,
+      "threads": 4,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 600
+    },
+    {
+      "id": "Sydney_routebased_1e-08_t8",
+      "kind": "tap",
+      "dataset": "Sydney",
+      "approach": "routebased",
+      "tolerance": 1e-08,
+      "threads": 8,
+      "max_iterations": 1000,
+      "repeats": 5,
+      "timeout": 600
+    },
+    {
       "id": "SiouxFalls_cndp_cobyla",
       "kind": "cndp",
       "dataset": "SiouxFalls",
@@ -236,9 +528,9 @@
       "timeout": 300
     }
   ],
-  "git_commit": "6ddddf0712d451dba4ad3ea932e87f00b7d59e35",
+  "git_commit": "3edfd5825af2e96175bfb64879f63cad4567b487",
   "working_tree_dirty": true,
-  "source_sha256": "0431620faaf10486cef732296a632e48360c7eec23459151f1d8df73fe03c52f",
+  "source_sha256": "f478be584b134e9ae9efd50f763b1d12370a9a4ab314c6c984462eb0b06ee09c",
   "source_files": {
     "CMakeLists.txt": "0852891b6f45889b9f1f58470342f75c95289c3b14b5f4276b38fc41e0a08ffb",
     "CMakePresets.json": "af5d921a48055bbf3d0108a3ff4408aca28e601c9884fc4f6a87db6d22453244",
@@ -298,7 +590,7 @@
     "cpp/src/detail/tap/data/OriginDestinationPair.h": "f1fba897809869465f1e61672c167f223c0d84164d04559e485497aee56392f9",
     "cpp/src/detail/tap/utils/StatisticsRecorder.h": "33398c63399f4cf4fcbf6cac5a586fd21604e80e2f1087dbedcd2b0cad98a104",
     "cpp/src/network.cpp": "f228195d02dc0001632745b5e43ebcbd6bcc988e189f2fda57c5797106ca44c6",
-    "pyproject.toml": "cc90722c6b582fbeeed8f0d23aebe2f5e1f3e23a51c04393a306408330827af5",
+    "pyproject.toml": "33bb3ad5d27f2842e666a640e20d878436ec2e4cf33ff48f4d99e71d9b3349ae",
     "python/traffic_assignment/__init__.py": "3c4495fc466e4346b0f48d5697b977aced9fdea326551905782773ffd7284cff",
     "python/traffic_assignment/_validation.py": "bf7fdcd496272d6a435992d6e592f82d6a358f579b69d1d53e27d1e5368cb4ef",
     "python/traffic_assignment/cndp.py": "4fef340714a35c60b33e7e8f0f6a6ed949aed40985ffa182a3a09238d9c88ea1",
@@ -308,11 +600,11 @@
     "python/traffic_assignment/tap.py": "f7c31be157be7e2bb6cc23b5ecaccf0cc9d5c56fc86e7377a1716855bb323ad3",
     "scripts/analyze_cndp_results.py": "c70a8ec654b1f4955d56deefad926e588a6c058a5a31f243530a968559d37064",
     "scripts/analyze_optimality.py": "d9fa4ae7028763943eaf52c6f32e6d186cef534236ec6a60394048de38ed7dad",
-    "scripts/benchmark_data.py": "bdf7edf7a95a12e6386d72a01b96317aef99767ceacab76c9ed6d4efa1373006",
-    "scripts/benchmark_report.py": "4b5867f12fbeef055a1d5cd22148749593d001ffb979c60d6125a373f721628e",
+    "scripts/benchmark_data.py": "f2882448496165b839d4626bce2f6472f04809689f647fae5589b7c3a79df137",
+    "scripts/benchmark_report.py": "31a99bda6cb506ebb78e1c111056dcd2a3f41e3fe0bd7936c1120b6a0432e054",
     "scripts/generate_constraints.py": "92196c66df5cddd73c2bef0285a907f33b82ba8a972ae32fd33121e1e15f7727",
     "scripts/plot_cndp_comparison.py": "ccdfc1ae1b3a2a947b7ffff93fd12f22a185f4c4e9beb1e81b9bf3b53aa934c7",
-    "scripts/run_benchmarks.py": "b0a1b8ab95c999b8a667fec9948a5b4e0334fa4ca1110f134532dae70673728a",
+    "scripts/run_benchmarks.py": "05508e55446bc5c386963e5a5c4e3f8769ebdba3d97dc81230d7391f63a8781f",
     "scripts/run_cndp_comparison.py": "45b835d5b0c850996849276614c85dd00a68c582a26aa6cb9b393beb4d2b7a97",
     "scripts/run_experiment.py": "fa4f70fbbf7d8f1da2934450d3d717586fdf8cec4fd51d3f724e628414573c41",
     "scripts/scale_demand.py": "bc4de68e68a8ce53d92e981df43f20c7076ac79a404d80d2a661750667d5beb8"
@@ -325,6 +617,7 @@
   "packages": {
     "traffic-assignment": "0.1.0",
     "numpy": "2.4.4",
+    "scipy": "1.18.1",
     "pandas": "3.0.2",
     "matplotlib": "3.10.9",
     "pybind11": "3.1.0",
@@ -339,7 +632,15 @@
     "extension_sha256": "c2bd20ec8aff42e55a3437d32a0b7eb409f1daf5ba04450b0f557fa8df5cf2f4"
   },
   "tapas_seed": 42,
-  "finished_utc": "2026-10-13T17:58:38.739894+00:00",
-  "measurement_wall_seconds": 281.669570258,
+  "numerical_thread_environment": {
+    "OPENBLAS_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "BLIS_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1"
+  },
+  "finished_utc": "2026-10-13T19:26:36.750101+00:00",
+  "measurement_wall_seconds": 2677.403812687,
   "complete": true
 }

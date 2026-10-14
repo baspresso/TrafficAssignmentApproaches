@@ -227,9 +227,28 @@ collection. Solver configurations are provided for Sioux Falls, Anaheim,
 Barcelona, Chicago Sketch, Sydney, Winnipeg, and other scenarios under
 [`configs/`](../configs).
 
-The [published benchmark study](benchmarks/README.md) reads pinned TNTP source
-files directly and preserves fractional demand. Its inputs can differ from
-legacy CSV conversions.
+The [published benchmark study](benchmarks/README.md) reads checksum-pinned TNTP
+sources for Sioux Falls, Chicago Sketch, Anaheim, and Sydney. Sydney reproduces
+the legacy CSV workload by rounding every nonnegative OD demand down to an integer;
+the other networks preserve fractional demand. Sydney's compressed demand is
+streamed once into a checked array cache. Its modeled demand totals 480,515,
+including 68,566 intrazonal trips, with 123,370 positive interzonal OD pairs.
+
+The study uses travel-time-only costs and unrestricted transit through every
+node. Anaheim and Sydney therefore represent project-specific routing variants;
+their original zone restrictions are not applied. Other than Sydney's documented
+conversion, study demand can differ from legacy CSV conversions. The existing
+`scripts/run_experiment.py tap --dataset Sydney` command uses the same Sydney
+network and demand, but enables statistics and has different timing boundaries.
+
+Install `pip install -e '.[benchmarks,test]' -Ccmake.build-type=Release` for the
+benchmark runner and its independent SciPy validation. The quick profile is a
+small Sioux Falls check; the full profile adds assignment comparisons on all four
+networks and 1–8-thread route-search scaling on Chicago Sketch, Anaheim, and Sydney.
+CNDP remains on Sioux Falls. The full profile defaults to a four-hour worker
+budget; `--time-budget SECONDS` overrides it. Workers run sequentially, and failed
+or unfinished cases remain visible in the report. Sydney's TAPAS solver requires
+several gigabytes of memory in addition to the input and route storage.
 
 Dataset files are not tracked in this repository. File-based workflows expect
 preprocessed `*_net.csv` and `*_trips.csv` files, plus capacity constraints for

@@ -33,31 +33,38 @@ The project grew out of graduate research at Saint Petersburg State University.
 ## Measured results
 
 The [benchmark study](docs/benchmarks/README.md) compares both assignment methods
-at three accuracy targets, measures route-search scaling with 1–8 threads, and
-evaluates a capacity-expansion scenario. Inputs come from a pinned revision of
+on **Sioux Falls, Chicago Sketch, Anaheim, and Sydney** at three accuracy targets,
+measures route-search scaling with 1–8 threads, and evaluates a capacity-expansion
+scenario. Inputs come from a pinned revision of
 [Transportation Networks for Research](https://github.com/bstabler/TransportationNetworks).
 
 On an Intel Core i7-13650HX with a GCC 15.2 Release build:
 
 | Study result | Measured outcome |
 | --- | --- |
-| Assignment scale | Chicago Sketch: **933 nodes, 2,950 links, 93,135 interzonal OD pairs** |
-| Accuracy | Both solvers met requested relative gaps down to **1e-10** on both networks |
-| Chicago Sketch runtime | **3.959 s** for route-based assignment at target gap 1e-8; median of five runs |
+| Assignment scale | Sydney: **33,113 nodes, 75,379 links, 123,370 interzonal OD pairs** |
+| Accuracy | Both solvers met requested relative gaps down to **1e-10** on all four networks |
+| Sydney runtime | **29.071 s** with one thread and **6.493 s** with eight threads for route-based assignment at target gap 1e-8; medians of five runs |
+| Parallel scaling | **4.48× whole-solve speedup** on Sydney with eight route-search threads |
 | Capacity optimization | **17.30% lower simulated travel time** on Sioux Falls, within the investment budget and capacity bounds |
-| Validation | **78/78 measured runs passed**, plus 16 successful warm-ups |
+| Validation | **168/168 measured runs passed**, plus 34 successful warm-ups |
 
-Parallel route search gave 0.90×, 0.96×, and 1.02× whole-solve speedups with
-2, 4, and 8 threads respectively. The eight-thread and serial timing ranges
-overlap; this workload shows little overall benefit from additional threads.
+Parallel gains depend on the workload: eight threads gave **1.40×** speedup on
+Anaheim and **0.98×** on Chicago Sketch. The study reports all repetitions and
+interquartile ranges, including configurations where extra threads did not help.
 
 ![Assignment runtime at matched accuracy targets](docs/benchmarks/figures/assignment_runtime.svg)
 
-The report includes all repetitions, validation results, machine/build details,
-input checksums, and commands to regenerate its tables and figures. Chicago Sketch
-uses a **travel-time-only** model; Sioux Falls is a small research benchmark.
-Capacity-optimization results describe simulated outcomes under the stated
-investment assumptions.
+**Dataset variants:** Anaheim and Sydney use unrestricted transit through every
+node. Sydney uses **CSV-compatible truncated demand**, reproducing the existing
+CSV workload; Anaheim preserves fractional source demand. These are
+project-specific variants. Chicago Sketch uses a **travel-time-only** model;
+Sioux Falls is a small research benchmark. Capacity-optimization results describe
+simulated outcomes under the stated investment assumptions.
+
+The report includes validation results, machine/build details, input and prepared
+data checksums, and commands to regenerate its tables and figures. The complete
+study took about **45 minutes** on this machine, within its four-hour worker budget.
 
 ## Quick start
 
@@ -124,14 +131,14 @@ in this repository evaluates the current software independently.
 ## Reproduce the study
 
 ```bash
-python -m pip install -e '.[examples,test]' -Ccmake.build-type=Release
+python -m pip install -e '.[benchmarks,test]' -Ccmake.build-type=Release
 
 # Short installation and numerical-validation check.
 python scripts/run_benchmarks.py --profile quick \
   --output performance_results/benchmark-quick
 
-# Full study: repeated measurements, with a one-hour worker budget.
-python scripts/run_benchmarks.py --profile full --time-budget 3600 \
+# Full study: four networks, with a four-hour worker budget.
+python scripts/run_benchmarks.py --profile full --time-budget 14400 \
   --output performance_results/benchmark-full
 
 # Regenerate the report and figures from saved measurements.
@@ -155,7 +162,7 @@ for timing boundaries, validation criteria, and limitations.
 | [Benchmark evidence](docs/benchmarks/README.md#evidence) | Raw measurements, summaries, configurations, and provenance |
 
 ```bash
-python -m pip install -e '.[test]'
+python -m pip install -e '.[test,benchmarks]'
 python -m pytest tests/
 
 cmake --preset linux-release -DBUILD_NATIVE_TESTS=ON
