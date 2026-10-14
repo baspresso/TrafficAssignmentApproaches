@@ -1,13 +1,10 @@
 # TrafficAssignmentApproaches
 
-**C++20 · Python · Graph algorithms · Bilevel optimization**
-
-Predict how traffic distributes across a road network, then optimize road
-capacities under an investment budget while accounting for how drivers reroute.
-TrafficAssignmentApproaches combines numerical algorithms with a reusable
-C++ library, a Python API, and reproducible computational experiments.
-
-The project grew out of graduate research at Saint Petersburg State University.
+TrafficAssignmentApproaches provides numerical methods for equilibrium traffic
+assignment and road capacity optimization subject to an investment budget,
+accounting for changes in drivers' route choices in response to capacity
+modifications. The project integrates these methods within a reusable C++ library
+and a Python API, supported by reproducible computational experiments.
 
 [Benchmark study](docs/benchmarks/README.md) ·
 [Quick start](#quick-start) ·
@@ -116,17 +113,13 @@ For DataFrame workflows and visualization, install `pip install -e '.[examples]'
 and open the self-contained [Sioux Falls assignment](examples/siouxfalls_tap.ipynb)
 or [capacity optimization](examples/siouxfalls_cndp.ipynb) notebook.
 
-## Related publication
+## Related publications
 
-Alexander Krylatov, **Maksim Korol**, and Anastasiya Raevskaya.
+Alexander Krylatov, Maksim Korol, Anastasiya Raevskaya.
 **[Equilibration Operators for Accurate Traffic Flow Assignment in Urban Road Networks](https://doi.org/10.1007/978-3-031-70300-3_39)**.
 In *Cybernetics and Control Theory in Systems*, CSOC 2024,
 Lecture Notes in Networks and Systems, vol. 1119, pp. 526–535.
-Springer, 2024. [BibTeX](docs/references.bib).
-
-This coauthored publication studies equilibration operators for accurate
-traffic assignment. It provides related research context; the benchmark study
-in this repository evaluates the current software independently.
+Springer, 2024.
 
 ## Reproduce the study
 
